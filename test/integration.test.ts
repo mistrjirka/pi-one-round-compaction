@@ -313,3 +313,100 @@ Implement strict tools and Qdrant indexes.
     else process.env.PI_WORK_HOME = oldWorkHome;
   }
 });
+
+test("idle input preflight compacts before a prompt would cross the model context window", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-preflight-test-"));
+  const agentDir = path.join(root, "agent");
+  const cwd = path.join(root, "repo");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+    const fakePi = {
+      on(name: string, handler: (event: unknown, ctx: unknown) => unknown) {
+        const list = handlers.get(name) ?? [];
+        list.push(handler);
+        handlers.set(name, list);
+      },
+      registerCommand() {},
+    };
+    oneRoundCompaction(fakePi as never);
+    const input = handlers.get("input")?.[0];
+    assert.ok(input);
+
+    let compactCalls = 0;
+    const notifications: string[] = [];
+    const fakeCtx = {
+      cwd,
+      isProjectTrusted: () => false,
+      isIdle: () => true,
+      getContextUsage: () => ({ tokens: 270_000, contextWindow: 272_000, percent: 99.26 }),
+      compact(options: { onComplete?: (result: unknown) => void }) {
+        compactCalls++;
+        options.onComplete?.({
+          summary: "checkpoint",
+          firstKeptEntryId: "u1",
+          tokensBefore: 270_000,
+          estimatedTokensAfter: 24_000,
+        });
+      },
+      ui: { notify(message: string) { notifications.push(message); } },
+    };
+
+    const result = await input({ type: "input", text: "x".repeat(12_000), source: "interactive" } as never, fakeCtx as never);
+    assert.equal(result, undefined);
+    assert.equal(compactCalls, 1);
+    assert.ok(notifications.some((message) => /273,000 \/ 272,000/.test(message)));
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  }
+});
+
+test("failed required preflight blocks the prompt instead of sending oversized context", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-preflight-fail-test-"));
+  const agentDir = path.join(root, "agent");
+  const cwd = path.join(root, "repo");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+    const fakePi = {
+      on(name: string, handler: (event: unknown, ctx: unknown) => unknown) {
+        const list = handlers.get(name) ?? [];
+        list.push(handler);
+        handlers.set(name, list);
+      },
+      registerCommand() {},
+    };
+    oneRoundCompaction(fakePi as never);
+    const input = handlers.get("input")?.[0];
+    assert.ok(input);
+
+    const notifications: string[] = [];
+    const fakeCtx = {
+      cwd,
+      isProjectTrusted: () => false,
+      isIdle: () => true,
+      getContextUsage: () => ({ tokens: 271_000, contextWindow: 272_000, percent: 99.63 }),
+      compact(options: { onError?: (error: Error) => void }) {
+        options.onError?.(new Error("simulated compaction failure"));
+      },
+      ui: { notify(message: string) { notifications.push(message); } },
+    };
+
+    const result = await input({ type: "input", text: "x".repeat(8_000), source: "interactive" } as never, fakeCtx as never);
+    assert.deepEqual(result, { action: "handled" });
+    assert.ok(notifications.some((message) => /Prompt not sent/.test(message)));
+    assert.ok(notifications.some((message) => /simulated compaction failure/.test(message)));
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  }
+});

@@ -74,7 +74,7 @@ Removing the other compaction extension does **not** remove Pi's native compacti
 Recommended: install the tagged release directly from GitHub:
 
 ```bash
-pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.0
+pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.1
 ```
 
 To follow the latest `main` instead:
@@ -86,7 +86,7 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction
 Pi also accepts the SSH form:
 
 ```bash
-pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.0
+pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.1
 ```
 
 For development from a local checkout:
@@ -132,7 +132,7 @@ The extension uses Pi's normal `compaction.keepRecentTokens` setting as a **budg
 }
 ```
 
-The plugin does not replace Pi's trigger settings. Pi still decides *when* automatic compaction runs; this extension replaces *how* the old prefix is compacted.
+Pi still owns its normal threshold and overflow triggers. In addition, this extension adds the zero-reserve preflight guard described below so a newly submitted prompt cannot be the thing that silently crosses the active model context window.
 
 ### 5. Optional plugin configuration
 
@@ -169,7 +169,7 @@ If you installed the unpinned Git source, update extensions normally with Pi:
 pi update --extensions
 ```
 
-A pinned install such as `@v0.3.0` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
+A pinned install such as `@v0.3.1` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
 
 ```bash
 pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
@@ -178,10 +178,26 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
 ### Uninstalling
 
 ```bash
-pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.0
+pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.1
 ```
 
 If Pi reports that the source string differs, run `pi list` and remove the exact listed package source.
+
+## Zero-reserve auto-compaction preflight
+
+`preflightAutoCompact` is enabled by default. Pi 0.84.x checks native threshold compaction before adding a newly submitted user prompt, so `reserveTokens: 0` can otherwise allow the new prompt itself to cross the model context window. This plugin projects the incoming prompt with Pi's estimator and compacts first when `current + incoming > contextWindow`. If that required compaction fails, the prompt is not sent.
+
+This configuration is supported:
+
+```json
+{
+  "compaction": {
+    "enabled": true,
+    "reserveTokens": 0,
+    "keepRecentTokens": 20000
+  }
+}
+```
 
 ## Configuration
 
@@ -209,6 +225,7 @@ Default behavior is equivalent to:
   "thinkingChars": 0,
   "recentControlChars": 16000,
   "includeGitState": true,
+  "preflightAutoCompact": true,
   "fallbackToNative": false,
   "lanes": {
     "intent": {
@@ -254,7 +271,7 @@ Unlike Pi's native cut point, the plugin walks backward by **complete turns** an
 
 Only the pathological case where the session effectively consists of one oversized turn falls back to Pi's split-turn boundary so compaction can make progress.
 
-The plugin does not change Pi's automatic compaction trigger. `compaction.reserveTokens` and the native trigger behavior still determine *when* compaction starts.
+Pi's native threshold/overflow triggers remain unchanged. `preflightAutoCompact` adds one extra trigger only for an idle user submission whose projected `current + incoming` context would exceed the active model window; it does not reserve a fixed number of tokens.
 
 ## Prompt overrides
 

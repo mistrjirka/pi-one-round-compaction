@@ -21,6 +21,7 @@ export interface OneRoundCompactionConfig {
   thinkingChars: number;
   recentControlChars: number;
   includeGitState: boolean;
+  preflightAutoCompact: boolean;
   fallbackToNative: boolean;
   lanes: {
     intent: LaneConfig;
@@ -37,6 +38,7 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   thinkingChars: 0,
   recentControlChars: 16000,
   includeGitState: true,
+  preflightAutoCompact: true,
   fallbackToNative: false,
   lanes: {
     intent: { maxOutputTokens: 3072 },
@@ -119,6 +121,7 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     "thinkingChars",
     "recentControlChars",
     "includeGitState",
+    "preflightAutoCompact",
     "fallbackToNative",
     "lanes",
   ]);
@@ -148,6 +151,11 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     thinkingChars: parseNonNegativeInt(value.thinkingChars, "thinkingChars", base.thinkingChars),
     recentControlChars: parseNonNegativeInt(value.recentControlChars, "recentControlChars", base.recentControlChars),
     includeGitState: parseBoolean(value.includeGitState, "includeGitState", base.includeGitState),
+    preflightAutoCompact: parseBoolean(
+      value.preflightAutoCompact,
+      "preflightAutoCompact",
+      base.preflightAutoCompact,
+    ),
     fallbackToNative: parseBoolean(value.fallbackToNative, "fallbackToNative", base.fallbackToNative),
     lanes,
   };

@@ -7,6 +7,7 @@ test("defaults use Muse Spark low", () => {
   assert.equal(DEFAULT_CONFIG.model, "opencode-go/muse-spark-1.2-contributor");
   assert.equal(DEFAULT_CONFIG.thinkingLevel, "low");
   assert.equal(DEFAULT_CONFIG.thinkingChars, 0);
+  assert.equal(DEFAULT_CONFIG.preflightAutoCompact, true);
 });
 
 test("project-style overrides merge lanes", () => {

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { CompactionResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { loadConfig, resolveLaneConfig } from "./config.js";
 import { activateIntentWorkflowForSession, detectIntentWorkflow } from "./intent-workflow.js";
@@ -20,13 +20,70 @@ import {
   type OneRoundDetails,
 } from "./core.js";
 import { createProgressReporter } from "./progress.js";
+import { getPreflightProjection, projectionExceedsContext } from "./preflight.js";
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function compactAndWait(ctx: ExtensionContext): Promise<CompactionResult> {
+  return new Promise((resolve, reject) => {
+    ctx.compact({
+      onComplete: resolve,
+      onError: reject,
+    });
+  });
+}
+
 export default function oneRoundCompaction(pi: ExtensionAPI): void {
   const extensionLoadedAtMs = Date.now();
+
+  // Pi 0.84.x checks native threshold compaction before it adds a newly submitted
+  // user prompt. With reserveTokens=0, a session can therefore be below the model
+  // limit at that check and cross the limit only after the new prompt is appended.
+  // Close that gap without inventing a reserve: project the incoming prompt itself.
+  pi.on("input", async (event, ctx) => {
+    if (!ctx.isIdle()) return;
+
+    // Fast path: ordinary prompts do not touch plugin config files at all.
+    const projection = getPreflightProjection(ctx, event.text, event.images);
+    if (!projection || !projectionExceedsContext(projection)) return;
+
+    let loaded: Awaited<ReturnType<typeof loadConfig>>;
+    try {
+      loaded = await loadConfig(ctx);
+    } catch (error) {
+      ctx.ui.notify(`One-round compaction config error: ${formatError(error)}`, "error");
+      return { action: "handled" };
+    }
+    if (!loaded.config.enabled || !loaded.config.preflightAutoCompact) return;
+
+    ctx.ui.notify(
+      `One-round preflight: projected ${projection.projectedTokens.toLocaleString()} / ${projection.contextWindow.toLocaleString()} tokens; compacting before request`,
+      "info",
+    );
+
+    try {
+      const result = await compactAndWait(ctx);
+      if (
+        result.estimatedTokensAfter !== undefined &&
+        result.estimatedTokensAfter + projection.incomingTokens > projection.contextWindow
+      ) {
+        ctx.ui.notify(
+          `Prompt not sent: even after compaction the projected context is ${(result.estimatedTokensAfter + projection.incomingTokens).toLocaleString()} / ${projection.contextWindow.toLocaleString()} tokens`,
+          "error",
+        );
+        return { action: "handled" };
+      }
+      return;
+    } catch (error) {
+      ctx.ui.notify(
+        `Prompt not sent because required preflight compaction failed: ${formatError(error)}`,
+        "error",
+      );
+      return { action: "handled" };
+    }
+  });
 
   pi.on("session_before_compact", async (event, ctx) => {
     let loaded: Awaited<ReturnType<typeof loadConfig>>;
@@ -239,6 +296,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `toolResultChars: ${config.toolResultChars}`,
           `thinkingChars: ${config.thinkingChars}`,
           `recentControlChars: ${config.recentControlChars}`,
+          `preflightAutoCompact: ${config.preflightAutoCompact} (projects each idle user prompt against the active model context window)`,
           intentWorkflow.active
             ? `intent workflow: ACTIVE workstream=${intentWorkflow.workstream} plan=${Boolean(intentWorkflow.plan)} intentTruncated=${intentWorkflow.intentTruncated} planTruncated=${intentWorkflow.planTruncated}`
             : `intent workflow: not detected (${intentWorkflow.reason}); using normal intent+execution lanes`,
