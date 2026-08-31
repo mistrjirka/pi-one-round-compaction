@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { OneRoundCompactionConfig, ThinkingLevel } from "./config.js";
+import { renderIntentWorkflow, type ActiveIntentWorkflow } from "./intent-workflow.js";
 import { SPLIT_TURN_NOTE } from "./prompts.js";
 
 const execFileAsync = promisify(execFile);
@@ -53,11 +54,12 @@ export interface DeterministicState {
   readFiles: string[];
   modifiedFiles: string[];
   recentUserContext: string[];
+  intentWorkflow?: ActiveIntentWorkflow;
 }
 
 export interface OneRoundDetails {
   plugin: "pi-one-round-compaction";
-  version: 1;
+  version: 2;
   lanes: Array<{
     lane: LaneName;
     model: string;
@@ -74,6 +76,13 @@ export interface OneRoundDetails {
   readFiles: string[];
   modifiedFiles: string[];
   git?: GitState;
+  intentWorkflow: {
+    active: boolean;
+    workstream?: string;
+    hasPlan?: boolean;
+    intentTruncated?: boolean;
+    planTruncated?: boolean;
+  };
 }
 
 type CompactionMessage = Parameters<typeof convertToLlm>[0][number];
@@ -470,9 +479,15 @@ export function buildLanePrompt(input: PromptBuildInput): string {
     );
   }
 
+  if (input.deterministic.intentWorkflow) {
+    sections.push(
+      `## Active intent-workflow ledger\nThis durable ledger is re-read from disk for every compaction. It is context, not authority over newer explicit user instructions. Do not rewrite its task semantics unless the lane prompt explicitly asks for that.\n\n${renderIntentWorkflow(input.deterministic.intentWorkflow)}`,
+    );
+  }
+
   const deterministic = renderDeterministicState(input.deterministic);
   if (deterministic) {
-    sections.push(`## Deterministic evidence\nThis block is authoritative where it states direct facts.\n\n${deterministic}`);
+    sections.push(`## Deterministic repository/user evidence\nThis block is authoritative where it states direct facts. Newer explicit user messages override older ledger/context state.\n\n${deterministic}`);
   }
 
   if (input.isSplitTurn) sections.push(`## Boundary note\n${SPLIT_TURN_NOTE}`);
@@ -620,6 +635,25 @@ export function deterministicMerge(params: {
   isSplitTurn: boolean;
 }): string {
   const deterministic = renderDeterministicState(params.deterministic);
+  const workflow = params.deterministic.intentWorkflow;
+
+  if (workflow) {
+    return [
+      "# Compaction Checkpoint",
+      "",
+      "## Durable Intent Workflow",
+      renderIntentWorkflow(workflow),
+      "",
+      "## Implementation State",
+      params.intent.text.trim(),
+      "",
+      "## Verification / Evidence State",
+      params.execution.text.trim(),
+      ...(deterministic ? ["", "## Deterministic Repository / Recent User State", deterministic] : []),
+      ...(params.isSplitTurn ? ["", "## Split-turn Context", SPLIT_TURN_NOTE] : []),
+    ].join("\n");
+  }
+
   return [
     "# Compaction Checkpoint",
     "",
@@ -645,7 +679,7 @@ export function makeOneRoundDetails(params: {
 }): OneRoundDetails {
   return {
     plugin: "pi-one-round-compaction",
-    version: 1,
+    version: 2,
     lanes: params.laneResults.map((result) => ({
       lane: result.lane,
       model: result.model,
@@ -662,6 +696,15 @@ export function makeOneRoundDetails(params: {
     readFiles: params.deterministic.readFiles,
     modifiedFiles: params.deterministic.modifiedFiles,
     ...(params.deterministic.git ? { git: params.deterministic.git } : {}),
+    intentWorkflow: params.deterministic.intentWorkflow
+      ? {
+          active: true,
+          workstream: params.deterministic.intentWorkflow.workstream,
+          hasPlan: Boolean(params.deterministic.intentWorkflow.plan),
+          intentTruncated: params.deterministic.intentWorkflow.intentTruncated,
+          planTruncated: params.deterministic.intentWorkflow.planTruncated,
+        }
+      : { active: false },
   };
 }
 

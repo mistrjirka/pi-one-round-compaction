@@ -18,6 +18,19 @@ older context
 
 The two LLM calls run concurrently. Neither call sees the other call's output and there is no LLM verifier/finalizer.
 
+When the project uses the DEVEON-style `intent-workflow`, the plugin auto-detects the active external ledger and changes roles automatically:
+
+```text
+active intent.md + optional plan.md ----+--> deterministic durable intent
+                                        |
+older context --> implementation lane --+--> deterministic merge
+              --> evidence/risk lane ----+
+
++ newest complete turns retained verbatim
+```
+
+No configuration flag is required. If no valid active ledger exists for the exact project, normal intent/scope + execution mode is used.
+
 ## Compatibility
 
 Verified against the current Pi packages on 2026-08-31:
@@ -142,6 +155,8 @@ Global files:
 ~/.pi/agent/one-round-compaction-system.md
 ~/.pi/agent/one-round-compaction-intent.md
 ~/.pi/agent/one-round-compaction-execution.md
+~/.pi/agent/one-round-compaction-workflow-implementation.md
+~/.pi/agent/one-round-compaction-workflow-evidence.md
 ```
 
 Trusted project overrides:
@@ -150,13 +165,34 @@ Trusted project overrides:
 .pi/one-round-compaction-system.md
 .pi/one-round-compaction-intent.md
 .pi/one-round-compaction-execution.md
+.pi/one-round-compaction-workflow-implementation.md
+.pi/one-round-compaction-workflow-evidence.md
 ```
 
 Project files take precedence over global files, which take precedence over built-ins. `/one-round-compaction` displays the effective prompt sources.
 
+## Intent-workflow auto-detection
+
+The plugin does not treat an installed skill as proof that a project uses the workflow. It activates intent-workflow mode only when the exact current project has a valid external active ledger using the workflow's canonical layout:
+
+```text
+${PI_WORK_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pi-work}/projects/
+  <project-slug>-<12-char-root-hash>/
+    project-root.txt
+    current -> intents/<workstream>/
+      intent.md
+      plan.md   # optional
+```
+
+Detection verifies the canonical project root, the root hash/binding, that `current` resolves inside that project's `intents/` directory, and that `intent.md` contains a non-empty `# Current intent`. Because the workflow's `current` symlink can persist after an old task, a valid pointer alone is not enough: the current Pi session must also have touched/activated that workstream, or a prior compaction in the same session must already have confirmed it. Missing, stale, unconfirmed, invalid, or unrelated ledgers simply select normal compaction mode.
+
+In active mode the plugin re-reads `intent.md` and `plan.md` from disk on every compaction. It deterministically preserves the current intent contract sections (`Current intent`, navigation context, direct user quotes, interpretation corrections, accepted behavior, hard constraints, boundaries, accepted decisions, acceptance checks, and open questions) while deliberately omitting `Evolution history`. Known untouched template-placeholder lines are also removed. The plugin is read-only: it never creates or modifies intent-workflow files.
+
+The ledger remains context rather than absolute authority. Newer retained raw user messages override stale ledger content, matching the intent-workflow's own precedence rule.
+
 ## What each lane sees
 
-### Intent/scope lane
+### Normal mode: intent/scope lane
 
 Receives all user messages from the compacted prefix and concise assistant text. Tool results and hidden reasoning are omitted. It owns only:
 
@@ -167,7 +203,7 @@ Receives all user messages from the compacted prefix and concise assistant text.
 
 It is explicitly forbidden from turning historical work back into current scope.
 
-### Execution-state lane
+### Normal mode: execution-state lane
 
 Receives the compacted prefix with tool calls and truncated tool results. Hidden reasoning is omitted by default. It owns only:
 
@@ -177,10 +213,20 @@ Receives the compacted prefix with tool calls and truncated tool results. Hidden
 - material discoveries/adjustments
 - remaining work and immediate next action
 
+### Active intent-workflow mode
+
+When a valid active ledger is detected, task semantics are no longer reconstructed by an LLM. `intent.md` and optional `plan.md` are preserved deterministically. The two parallel calls are repurposed:
+
+- first lane: implementation continuation state (`Done`, current code/repository state, material discoveries, remaining/immediate actions)
+- second lane: verification/evidence state (tests/checks, important failures, unresolved risks/open questions, critical exact context)
+
+Both lanes are explicitly forbidden from redefining or broadening the durable intent. Newer explicit user instructions in the compacted conversation and the retained raw turns still outrank the ledger.
+
 ### Deterministic state
 
 Merged without an LLM:
 
+- active intent-workflow contract + optional current plan, when validly detected
 - current git root/branch/HEAD
 - dirty working-tree paths
 - cumulative Pi read/modified file lists
@@ -200,6 +246,7 @@ The returned compaction entry stores structured `details` with:
 - estimated retained tokens and boundary mode
 - cumulative read/modified files
 - git state
+- intent-workflow active/inactive status, workstream, plan presence, and truncation flags
 
 The standard compaction entry also contains combined `usage`, `tokensBefore`, `estimatedTokensAfter`, and the actual `summary`. PiTTy can render these directly from the `session_compact` event; no terminal-log parsing is needed.
 
@@ -210,4 +257,4 @@ npm run typecheck
 npm test
 ```
 
-The tests cover configuration validation, lane views, deterministic merge, cumulative file state, whole-turn token-budget retention, oversized newest turns, and the single-turn fallback.
+The tests cover configuration validation, lane views, deterministic merge, cumulative file state, whole-turn token-budget retention, oversized newest turns, the single-turn fallback, intent-workflow auto-detection/stale-ledger rejection, and both normal-mode and active-workflow two-call concurrency.

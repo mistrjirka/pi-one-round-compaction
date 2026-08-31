@@ -54,4 +54,55 @@ Rules:
 - Do not introduce work that the user excluded.
 - Be concise.`;
 
+export const WORKFLOW_IMPLEMENTATION_LANE_PROMPT = `An active intent-workflow ledger is supplied as deterministic evidence. It already owns the user's durable objective, accepted behavior, constraints, boundaries, decisions, and optional implementation plan. Do NOT restate or rewrite that contract.
+
+You own implementation continuation state only.
+
+Produce exactly these headings:
+
+## Done
+Only implementation work actually completed toward the active durable intent.
+
+## Current Code / Repository State
+Relevant files, symbols, behaviors, branch/worktree facts, and invariants needed to continue.
+
+## Adjustments / Discoveries
+Only findings that materially change execution of the active intent or prevent repeated wasted work.
+
+## Remaining / Immediate Next Actions
+What remains NOW. The first item must be directly actionable.
+
+Rules:
+- The durable intent/plan block is context, but newer explicit user instructions in the conversation override it.
+- Never broaden scope beyond the durable intent or newer explicit user instructions.
+- Current verified state beats chronology.
+- Remove stale/resolved implementation history.
+- Do not include verification detail except when it directly determines implementation state.
+- Be concise.`;
+
+export const WORKFLOW_EVIDENCE_LANE_PROMPT = `An active intent-workflow ledger is supplied as deterministic evidence. It already owns task semantics. Do NOT redefine the objective or implementation plan.
+
+You own evidence and risk state only.
+
+Produce exactly these headings:
+
+## Verification State
+Exact important tests, typecheck, lint, build, runtime/manual checks and their PASS / FAIL / NOT RUN state. Never infer PASS.
+
+## Important Failures / Wrong Turns
+Only failures whose lesson prevents repeated wasted work. Preserve the lesson, not noisy command chronology.
+
+## Unresolved Risks / Open Questions
+Current blockers, uncertainty, validation gaps, or questions that can materially alter completion.
+
+## Critical Exact Context
+Only exact errors, commands, identifiers, numeric thresholds, API/type signatures, or other details whose exact form matters for continuation.
+
+Rules:
+- The durable intent/plan block is context, but newer explicit user instructions in the conversation override it.
+- Do not invent implementation tasks or broaden scope.
+- Prefer current evidence over historical evidence.
+- Distinguish unrelated/pre-existing failures from failures caused by current work.
+- Be concise.`;
+
 export const SPLIT_TURN_NOTE = `The compaction boundary fell inside one unusually large turn. The later suffix of that turn remains verbatim after this checkpoint. Treat the retained suffix as newer evidence if it conflicts with this checkpoint.`;

@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { loadConfig, resolveLaneConfig } from "./config.js";
+import { activateIntentWorkflowForSession, detectIntentWorkflow } from "./intent-workflow.js";
 import { loadPromptSet } from "./prompt-loader.js";
 import {
   buildLanePrompt,
@@ -23,15 +24,28 @@ function formatError(error: unknown): string {
 }
 
 export default function oneRoundCompaction(pi: ExtensionAPI): void {
+  const extensionLoadedAtMs = Date.now();
+
   pi.on("session_before_compact", async (event, ctx) => {
     let loaded: Awaited<ReturnType<typeof loadConfig>>;
     let promptSet: Awaited<ReturnType<typeof loadPromptSet>>;
+    let intentWorkflow: Awaited<ReturnType<typeof detectIntentWorkflow>>;
     try {
-      [loaded, promptSet] = await Promise.all([loadConfig(ctx), loadPromptSet(ctx)]);
+      [loaded, promptSet, intentWorkflow] = await Promise.all([
+        loadConfig(ctx),
+        loadPromptSet(ctx),
+        detectIntentWorkflow(ctx.cwd),
+      ]);
     } catch (error) {
       ctx.ui.notify(`One-round compaction configuration/prompt error: ${formatError(error)}`, "error");
       return;
     }
+
+    intentWorkflow = activateIntentWorkflowForSession(
+      intentWorkflow,
+      event.branchEntries,
+      extensionLoadedAtMs,
+    );
 
     const { config } = loaded;
     if (!config.enabled) return;
@@ -45,12 +59,18 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const deterministicWithoutGit: DeterministicState = {
       ...fileState,
       recentUserContext,
+      ...(intentWorkflow.active ? { intentWorkflow } : {}),
     };
 
+    const executionView = serializeExecutionView(
+      allDiscarded,
+      config.toolResultChars,
+      config.thinkingChars,
+    );
     const intentPrompt = buildLanePrompt({
       lane: "intent",
-      lanePrompt: promptSet.intent,
-      serializedConversation: serializeIntentView(allDiscarded),
+      lanePrompt: intentWorkflow.active ? promptSet.workflowImplementation : promptSet.intent,
+      serializedConversation: intentWorkflow.active ? executionView : serializeIntentView(allDiscarded),
       previousSummary: boundary.previousSummary,
       customInstructions: event.customInstructions,
       deterministic: deterministicWithoutGit,
@@ -58,12 +78,8 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     });
     const executionPrompt = buildLanePrompt({
       lane: "execution",
-      lanePrompt: promptSet.execution,
-      serializedConversation: serializeExecutionView(
-        allDiscarded,
-        config.toolResultChars,
-        config.thinkingChars,
-      ),
+      lanePrompt: intentWorkflow.active ? promptSet.workflowEvidence : promptSet.execution,
+      serializedConversation: executionView,
       previousSummary: boundary.previousSummary,
       customInstructions: event.customInstructions,
       deterministic: deterministicWithoutGit,
@@ -71,8 +87,11 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     });
 
     const started = performance.now();
+    const workflowLabel = intentWorkflow.active
+      ? `intent-workflow=${intentWorkflow.workstream}`
+      : `intent-workflow=not detected (${intentWorkflow.reason})`;
     ctx.ui.notify(
-      `One-round compaction: 2 parallel lanes; keeping ${boundary.retainedTurns} complete recent turn(s) (~${boundary.estimatedRetainedTokens.toLocaleString()} tokens, budget ${event.preparation.settings.keepRecentTokens.toLocaleString()})`,
+      `One-round compaction: 2 parallel lanes; ${workflowLabel}; keeping ${boundary.retainedTurns} complete recent turn(s) (~${boundary.estimatedRetainedTokens.toLocaleString()} tokens, budget ${event.preparation.settings.keepRecentTokens.toLocaleString()})`,
       "info",
     );
 
@@ -161,10 +180,16 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     description: "Show one-round compaction configuration",
     handler: async (_args, ctx) => {
       try {
-        const [{ config, globalPath, projectPath }, promptSet] = await Promise.all([
+        const [{ config, globalPath, projectPath }, promptSet, detectedIntentWorkflow] = await Promise.all([
           loadConfig(ctx),
           loadPromptSet(ctx),
+          detectIntentWorkflow(ctx.cwd),
         ]);
+        const intentWorkflow = activateIntentWorkflowForSession(
+          detectedIntentWorkflow,
+          ctx.sessionManager.getBranch(),
+          extensionLoadedAtMs,
+        );
         const intent = resolveLaneConfig(config, "intent");
         const execution = resolveLaneConfig(config, "execution");
         const lines = [
@@ -176,7 +201,12 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `toolResultChars: ${config.toolResultChars}`,
           `thinkingChars: ${config.thinkingChars}`,
           `recentControlChars: ${config.recentControlChars}`,
-          `prompts: system=${promptSet.sources.system}; intent=${promptSet.sources.intent}; execution=${promptSet.sources.execution}`,
+          intentWorkflow.active
+            ? `intent workflow: ACTIVE workstream=${intentWorkflow.workstream} plan=${Boolean(intentWorkflow.plan)} intentTruncated=${intentWorkflow.intentTruncated} planTruncated=${intentWorkflow.planTruncated}`
+            : `intent workflow: not detected (${intentWorkflow.reason}); using normal intent+execution lanes`,
+          intentWorkflow.active
+            ? `prompts: system=${promptSet.sources.system}; implementation=${promptSet.sources.workflowImplementation}; evidence=${promptSet.sources.workflowEvidence}`
+            : `prompts: system=${promptSet.sources.system}; intent=${promptSet.sources.intent}; execution=${promptSet.sources.execution}`,
           "recent-turn budget: Pi's compaction.keepRecentTokens setting; this plugin keeps the newest complete turns that fit",
           `fallbackToNative: ${config.fallbackToNative} (false guarantees no sequential LLM fallback)`,
           "LLM topology: 2 calls in parallel, deterministic merge, no LLM follow-up/finalizer",

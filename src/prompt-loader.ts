@@ -7,16 +7,22 @@ import {
   COMPACTION_SYSTEM_PROMPT,
   EXECUTION_LANE_PROMPT,
   INTENT_LANE_PROMPT,
+  WORKFLOW_EVIDENCE_LANE_PROMPT,
+  WORKFLOW_IMPLEMENTATION_LANE_PROMPT,
 } from "./prompts.js";
 
 export interface PromptSet {
   system: string;
   intent: string;
   execution: string;
+  workflowImplementation: string;
+  workflowEvidence: string;
   sources: {
     system: string;
     intent: string;
     execution: string;
+    workflowImplementation: string;
+    workflowEvidence: string;
   };
 }
 
@@ -24,6 +30,8 @@ const FILES = {
   system: "one-round-compaction-system.md",
   intent: "one-round-compaction-intent.md",
   execution: "one-round-compaction-execution.md",
+  workflowImplementation: "one-round-compaction-workflow-implementation.md",
+  workflowEvidence: "one-round-compaction-workflow-evidence.md",
 } as const;
 
 type PromptName = keyof typeof FILES;
@@ -45,12 +53,16 @@ export async function loadPromptSet(
     system: COMPACTION_SYSTEM_PROMPT,
     intent: INTENT_LANE_PROMPT,
     execution: EXECUTION_LANE_PROMPT,
+    workflowImplementation: WORKFLOW_IMPLEMENTATION_LANE_PROMPT,
+    workflowEvidence: WORKFLOW_EVIDENCE_LANE_PROMPT,
   };
   const values: Record<PromptName, string> = { ...builtins };
   const sources: Record<PromptName, string> = {
     system: "built-in",
     intent: "built-in",
     execution: "built-in",
+    workflowImplementation: "built-in",
+    workflowEvidence: "built-in",
   };
 
   for (const name of Object.keys(FILES) as PromptName[]) {
@@ -77,6 +89,8 @@ export async function loadPromptSet(
     system: values.system,
     intent: values.intent,
     execution: values.execution,
+    workflowImplementation: values.workflowImplementation,
+    workflowEvidence: values.workflowEvidence,
     sources,
   };
 }
