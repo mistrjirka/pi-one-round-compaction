@@ -20,6 +20,12 @@ export interface OneRoundCompactionConfig {
   toolResultChars: number;
   thinkingChars: number;
   recentControlChars: number;
+  userMessageChars: number;
+  targetPostCompactTokens: number;
+  intentWorkflowChars: number;
+  gitStateChars: number;
+  editedFilesChars: number;
+  readFilesChars: number;
   includeGitState: boolean;
   preflightAutoCompact: boolean;
   fallbackToNative: boolean;
@@ -37,6 +43,12 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   toolResultChars: 2000,
   thinkingChars: 0,
   recentControlChars: 16000,
+  userMessageChars: 900,
+  targetPostCompactTokens: 40000,
+  intentWorkflowChars: 8000,
+  gitStateChars: 4000,
+  editedFilesChars: 6000,
+  readFilesChars: 1000,
   includeGitState: true,
   preflightAutoCompact: true,
   fallbackToNative: false,
@@ -120,6 +132,12 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     "toolResultChars",
     "thinkingChars",
     "recentControlChars",
+    "userMessageChars",
+    "targetPostCompactTokens",
+    "intentWorkflowChars",
+    "gitStateChars",
+    "editedFilesChars",
+    "readFilesChars",
     "includeGitState",
     "preflightAutoCompact",
     "fallbackToNative",
@@ -150,6 +168,12 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     toolResultChars: parsePositiveInt(value.toolResultChars, "toolResultChars", base.toolResultChars),
     thinkingChars: parseNonNegativeInt(value.thinkingChars, "thinkingChars", base.thinkingChars),
     recentControlChars: parseNonNegativeInt(value.recentControlChars, "recentControlChars", base.recentControlChars),
+    userMessageChars: parsePositiveInt(value.userMessageChars, "userMessageChars", base.userMessageChars),
+    targetPostCompactTokens: parsePositiveInt(value.targetPostCompactTokens, "targetPostCompactTokens", base.targetPostCompactTokens),
+    intentWorkflowChars: parsePositiveInt(value.intentWorkflowChars, "intentWorkflowChars", base.intentWorkflowChars),
+    gitStateChars: parseNonNegativeInt(value.gitStateChars, "gitStateChars", base.gitStateChars),
+    editedFilesChars: parseNonNegativeInt(value.editedFilesChars, "editedFilesChars", base.editedFilesChars),
+    readFilesChars: parseNonNegativeInt(value.readFilesChars, "readFilesChars", base.readFilesChars),
     includeGitState: parseBoolean(value.includeGitState, "includeGitState", base.includeGitState),
     preflightAutoCompact: parseBoolean(
       value.preflightAutoCompact,

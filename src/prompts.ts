@@ -32,8 +32,8 @@ Produce exactly these headings:
 Only work completed that materially affects continuation of the current task.
 
 ## Current Code / Repository State
-Relevant files, symbols, behaviors, branch/worktree facts present in the supplied evidence, and important invariants.
-Do not reproduce large code blocks.
+Relevant files, symbols, behaviors, and important invariants present in the supplied evidence.
+Do not reproduce large code blocks. Do not spend output on a current branch/HEAD/dirty-path inventory; fresh deterministic state is appended separately. Mention a commit only when it is semantically important to continuation.
 
 ## Verification State
 Exact important commands/results when known. Mark PASS / FAIL / NOT RUN. Never infer PASS.
@@ -64,7 +64,8 @@ Produce exactly these headings:
 Only implementation work actually completed toward the active durable intent.
 
 ## Current Code / Repository State
-Relevant files, symbols, behaviors, branch/worktree facts, and invariants needed to continue.
+Relevant files, symbols, behaviors, and invariants needed to continue.
+Do not spend output on a current branch/HEAD/dirty-path inventory; fresh deterministic state is appended separately. Mention a commit only when it is semantically important to continuation.
 
 ## Adjustments / Discoveries
 Only findings that materially change execution of the active intent or prevent repeated wasted work.

@@ -29,7 +29,9 @@ export interface CompactionProgressV1 {
   retainedTurns: number;
   estimatedRetainedTokens: number;
   keepRecentTokens: number;
-  boundaryMode: "whole-turn" | "pi-fallback";
+  targetPostCompactTokens: number;
+  effectiveRecentTokenBudget: number;
+  boundaryMode: "whole-turn" | "split-turn" | "pi-fallback";
   intentWorkflow?: {
     active: true;
     workstream: string;
@@ -103,7 +105,9 @@ export function createProgressReporter(params: {
   retainedTurns: number;
   estimatedRetainedTokens: number;
   keepRecentTokens: number;
-  boundaryMode: "whole-turn" | "pi-fallback";
+  targetPostCompactTokens: number;
+  effectiveRecentTokenBudget: number;
+  boundaryMode: "whole-turn" | "split-turn" | "pi-fallback";
   intentWorkflow?: { workstream: string; hasPlan: boolean };
   roles: Record<LaneName, LaneRole>;
 }): ProgressReporter {
@@ -144,6 +148,8 @@ export function createProgressReporter(params: {
       retainedTurns: params.retainedTurns,
       estimatedRetainedTokens: params.estimatedRetainedTokens,
       keepRecentTokens: params.keepRecentTokens,
+      targetPostCompactTokens: params.targetPostCompactTokens,
+      effectiveRecentTokenBudget: params.effectiveRecentTokenBudget,
       boundaryMode: params.boundaryMode,
       ...(params.intentWorkflow
         ? {

@@ -74,7 +74,7 @@ Removing the other compaction extension does **not** remove Pi's native compacti
 Recommended: install the tagged release directly from GitHub:
 
 ```bash
-pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.1
+pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.2
 ```
 
 To follow the latest `main` instead:
@@ -86,7 +86,7 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction
 Pi also accepts the SSH form:
 
 ```bash
-pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.1
+pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.2
 ```
 
 For development from a local checkout:
@@ -122,7 +122,7 @@ If that provider/model is not available in your Pi setup, configure another mode
 
 ### 4. Choose how much recent context stays verbatim
 
-The extension uses Pi's normal `compaction.keepRecentTokens` setting as a **budget for the newest complete turns**. For example, in `~/.pi/agent/settings.json`:
+The extension uses Pi's normal `compaction.keepRecentTokens` as the **maximum raw recent-context budget**. It also has a post-compaction target (40k tokens by default), so the effective raw budget can be smaller when room is needed for the two LLM summaries and deterministic state. For example, in `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -169,7 +169,7 @@ If you installed the unpinned Git source, update extensions normally with Pi:
 pi update --extensions
 ```
 
-A pinned install such as `@v0.3.1` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
+A pinned install such as `@v0.3.2` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
 
 ```bash
 pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
@@ -178,7 +178,7 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
 ### Uninstalling
 
 ```bash
-pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.1
+pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.2
 ```
 
 If Pi reports that the source string differs, run `pi list` and remove the exact listed package source.
@@ -224,6 +224,12 @@ Default behavior is equivalent to:
   "toolResultChars": 2000,
   "thinkingChars": 0,
   "recentControlChars": 16000,
+  "userMessageChars": 900,
+  "targetPostCompactTokens": 40000,
+  "intentWorkflowChars": 8000,
+  "gitStateChars": 4000,
+  "editedFilesChars": 6000,
+  "readFilesChars": 1000,
   "includeGitState": true,
   "preflightAutoCompact": true,
   "fallbackToNative": false,
@@ -255,9 +261,9 @@ Each lane may independently override `model`, `thinkingLevel`, or `maxOutputToke
 
 `fallbackToNative` defaults to `false`. This guarantees that a failed lane does not silently trigger a later native LLM summarization call. Setting it to `true` trades that guarantee for automatic recovery.
 
-## Recent-turn budget
+## Post-compaction target and recent-turn budget
 
-The plugin uses Pi's existing setting as the token budget:
+Pi's setting remains the upper bound for verbatim recent context:
 
 ```json
 {
@@ -267,11 +273,13 @@ The plugin uses Pi's existing setting as the token budget:
 }
 ```
 
-Unlike Pi's native cut point, the plugin walks backward by **complete turns** and keeps the newest complete turns whose estimated total fits the budget. If the newest turn alone is larger than the budget, it is kept intact when older history can still be compacted.
+`targetPostCompactTokens` defaults to `40000`. Before choosing the cut point, the plugin reserves room for **both configured LLM lane outputs** plus bounded deterministic state, then gives the remainder to raw recent context (never more than `keepRecentTokens`). This prevents a 20k raw suffix from crowding out the summaries, Git state, edited files, intent contract, or user-message history.
 
-Only the pathological case where the session effectively consists of one oversized turn falls back to Pi's split-turn boundary so compaction can make progress.
+Ordinary recent turns are kept whole. If the newest tool-heavy turn alone exceeds the effective recent budget, the plugin now cuts at a Pi-compatible assistant/user/custom message boundary and summarizes the discarded prefix. It never keeps a 100k+ turn merely because it is one turn. The retained suffix stays provider-safe: tool results are not orphaned from their preceding assistant tool call.
 
-Pi's native threshold/overflow triggers remain unchanged. `preflightAutoCompact` adds one extra trigger only for an idle user submission whose projected `current + incoming` context would exceed the active model window; it does not reserve a fixed number of tokens.
+The target is deliberately **soft**. LLM lane summaries are high-priority and are never clipped to hit it. Deterministic categories have floors and are scaled together when necessary; if even those floors plus the LLM summaries exceed the target, the checkpoint remains useful and reports `targetExceeded` instead of destroying summary quality.
+
+Pi's native threshold/overflow triggers remain unchanged. `preflightAutoCompact` adds one extra trigger only for an idle user submission whose projected `current + incoming` context would exceed the active model window; it does not reserve a fixed number of tokens before compaction.
 
 ## Prompt overrides
 
@@ -314,7 +322,7 @@ ${PI_WORK_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pi-work}/projects/
 
 Detection verifies the canonical project root, the root hash/binding, that `current` resolves inside that project's `intents/` directory, and that `intent.md` contains a non-empty `# Current intent`. Because the workflow's `current` symlink can persist after an old task, a valid pointer alone is not enough: the current Pi session must also have touched/activated that workstream, or a prior compaction in the same session must already have confirmed it. Missing, stale, unconfirmed, invalid, or unrelated ledgers simply select normal compaction mode.
 
-In active mode the plugin re-reads `intent.md` and `plan.md` from disk on every compaction. It deterministically preserves the current intent contract sections (`Current intent`, navigation context, direct user quotes, interpretation corrections, accepted behavior, hard constraints, boundaries, accepted decisions, acceptance checks, and open questions) while deliberately omitting `Evolution history`. Known untouched template-placeholder lines are also removed. The plugin is read-only: it never creates or modifies intent-workflow files.
+In active mode the plugin re-reads `intent.md` and `plan.md` from disk on every compaction. It extracts the current intent contract sections (`Current intent`, navigation context, direct user quotes, interpretation corrections, accepted behavior, hard constraints, boundaries, accepted decisions, acceptance checks, and open questions) while deliberately omitting `Evolution history`. The persisted checkpoint keeps a bounded prioritized intent contract plus the exact `intent.md`/`plan.md` paths; it does **not** paste the full plan. The LLM lanes receive only a small bounded plan excerpt for orientation. Known untouched template-placeholder lines are also removed. The plugin is read-only: it never creates or modifies intent-workflow files.
 
 The ledger remains context rather than absolute authority. Newer retained raw user messages override stale ledger content, matching the intent-workflow's own precedence rule.
 
@@ -343,7 +351,7 @@ Receives the compacted prefix with tool calls and truncated tool results. Hidden
 
 ### Active intent-workflow mode
 
-When a valid active ledger is detected, task semantics are no longer reconstructed by an LLM. `intent.md` and optional `plan.md` are preserved deterministically. The two parallel calls are repurposed:
+When a valid active ledger is detected, task semantics are no longer reconstructed by an LLM. A bounded prioritized view of `intent.md` plus the intent/plan paths is preserved deterministically; `plan.md` is referenced rather than copied wholesale into every checkpoint. The two parallel calls are repurposed:
 
 - first lane: implementation continuation state (`Done`, current code/repository state, material discoveries, remaining/immediate actions)
 - second lane: verification/evidence state (tests/checks, important failures, unresolved risks/open questions, critical exact context)
@@ -354,12 +362,13 @@ Both lanes are explicitly forbidden from redefining or broadening the durable in
 
 Merged without an LLM:
 
-- active intent-workflow contract + optional current plan, when validly detected
-- current git root/branch/HEAD
-- dirty working-tree paths
-- cumulative Pi read/modified file lists
-- recent user requirement text from the summarized prefix
-- retention boundary metadata
+- bounded active intent-workflow contract + exact intent/plan paths (full plan not duplicated)
+- current git root/branch/HEAD and bounded dirty paths, ordered by filesystem modification time when available
+- files actually edited/written in the compacted trace, newest touch first and character-bounded
+- a much smaller bounded list of trace-local read files
+- cumulative compacted user-message ledger across repeated compactions; each source message is capped at 900 chars and explicitly marked when trimmed
+- full cumulative file/user metadata in structured compaction `details`, even when the model-facing rendering is reduced
+- retention/target metadata, including effective raw budget and whether the soft target was exceeded
 
 ## PiTTy / observability
 
@@ -430,8 +439,11 @@ The returned compaction entry stores structured `details` with:
 - wall-clock duration and per-lane duration
 - per-lane token/cost usage
 - retained complete-turn count
-- estimated retained tokens and boundary mode
-- cumulative read/modified files
+- configured/effective recent-token budgets, target post-compaction tokens, estimated tokens after compaction, and `targetExceeded`
+- retained tokens and boundary mode (`whole-turn`, `split-turn`, or compatibility fallback)
+- cumulative read/modified files plus trace-local recency-ordered edited/read files
+- complete capped cumulative user-message ledger
+- final per-category render budgets used to fit the checkpoint
 - git state
 - intent-workflow active/inactive status, workstream, plan presence, and truncation flags
 

@@ -41,6 +41,8 @@ function reporterHarness() {
     retainedTurns: 2,
     estimatedRetainedTokens: 1234,
     keepRecentTokens: 2048,
+    targetPostCompactTokens: 4000,
+    effectiveRecentTokenBudget: 1500,
     boundaryMode: "whole-turn",
     roles: { intent: "intent", execution: "execution" },
   });
@@ -77,6 +79,8 @@ test("RPC progress uses vanilla Pi setStatus/setWidget surfaces with structured 
   assert.ok(frames.some((frame) => frame.lanes.intent.delta === "hello"));
   assert.ok(frames.some((frame) => frame.lanes.execution.delta === "world"));
   assert.ok(frames.every((frame) => frame.retainedTurns === 2));
+  assert.ok(frames.every((frame) => frame.targetPostCompactTokens === 4000));
+  assert.ok(frames.every((frame) => frame.effectiveRecentTokenBudget === 1500));
 
   assert.ok(eventCalls.length > 0);
   assert.ok(eventCalls.every((call) => call.channel === COMPACTION_PROGRESS_EVENT));
@@ -118,6 +122,8 @@ test("progress surfaces are best-effort and can never fail compaction", () => {
       retainedTurns: 1,
       estimatedRetainedTokens: 500,
       keepRecentTokens: 1000,
+      targetPostCompactTokens: 3000,
+      effectiveRecentTokenBudget: 800,
       boundaryMode: "whole-turn",
       intentWorkflow: { workstream: "strict-tools", hasPlan: true },
       roles: { intent: "implementation", execution: "evidence" },

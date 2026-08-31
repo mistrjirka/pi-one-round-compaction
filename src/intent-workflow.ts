@@ -297,14 +297,75 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
   };
 }
 
-export function renderIntentWorkflow(snapshot: ActiveIntentWorkflow): string {
-  const parts = [
-    `Active workstream: \`${snapshot.workstream}\``,
-    "",
-    snapshot.intentContract,
-  ];
-  if (snapshot.plan) {
-    parts.push("", "# Current implementation plan", "", snapshot.plan);
+export interface IntentWorkflowRenderOptions {
+  /** Hard character budget for the rendered workflow block. */
+  maxChars?: number;
+  /** Include a bounded plan excerpt. Final checkpoints normally keep only the path. */
+  includePlanBody?: boolean;
+  /** Maximum characters from plan.md when includePlanBody is true. */
+  planChars?: number;
+}
+
+const COMPACT_CONTRACT_PRIORITY = [
+  "Current intent",
+  "Hard constraints",
+  "Boundaries",
+  "Accepted decisions",
+  "Acceptance checks",
+  "Navigation context",
+  "Accepted behavior",
+  "Interpretation corrections",
+  "Open questions",
+  "Direct user quotes",
+] as const;
+
+function compactIntentContract(contract: string, maxChars: number): string {
+  if (maxChars <= 0) return "";
+  const sections = parseH1Sections(contract);
+  const rendered: string[] = [];
+  let used = 0;
+
+  for (const heading of COMPACT_CONTRACT_PRIORITY) {
+    const body = sections.get(heading)?.trim();
+    if (!body) continue;
+    const prefix = `# ${heading}\n\n`;
+    const separator = rendered.length > 0 ? "\n\n" : "";
+    const remaining = maxChars - used - separator.length - prefix.length;
+    if (remaining <= 0) break;
+    // No individual section should consume the whole compact ledger.
+    const perSection = Math.min(remaining, Math.max(900, Math.floor(maxChars * 0.28)));
+    const clipped = clip(body, perSection).text;
+    rendered.push(`${prefix}${clipped}`);
+    used += separator.length + prefix.length + clipped.length;
   }
-  return parts.join("\n");
+
+  return rendered.join("\n\n");
+}
+
+export function renderIntentWorkflow(
+  snapshot: ActiveIntentWorkflow,
+  options: IntentWorkflowRenderOptions = {},
+): string {
+  const maxChars = options.maxChars ?? Number.MAX_SAFE_INTEGER;
+  const includePlanBody = options.includePlanBody ?? true;
+  const planChars = options.planChars ?? 8_000;
+  const metadata = [
+    `Active workstream: \`${snapshot.workstream}\``,
+    `Intent: \`${snapshot.intentPath}\``,
+    ...(snapshot.planPath ? [`Plan: \`${snapshot.planPath}\``] : []),
+  ].join("\n");
+
+  const planReserve = includePlanBody && snapshot.plan
+    ? Math.min(planChars + 40, Math.floor(maxChars * 0.38))
+    : 0;
+  const contractBudget = Math.max(0, maxChars - metadata.length - planReserve - 4);
+  const contract = compactIntentContract(snapshot.intentContract, contractBudget);
+  const parts = [metadata, ...(contract ? ["", contract] : [])];
+
+  if (includePlanBody && snapshot.plan) {
+    const body = clip(snapshot.plan, Math.min(planChars, Math.max(0, maxChars - parts.join("\n").length - 36))).text;
+    if (body) parts.push("", "# Current implementation plan (excerpt)", "", body);
+  }
+
+  return clip(parts.join("\n"), maxChars).text;
 }

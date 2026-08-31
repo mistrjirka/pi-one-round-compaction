@@ -8,6 +8,12 @@ test("defaults use Muse Spark low", () => {
   assert.equal(DEFAULT_CONFIG.thinkingLevel, "low");
   assert.equal(DEFAULT_CONFIG.thinkingChars, 0);
   assert.equal(DEFAULT_CONFIG.preflightAutoCompact, true);
+  assert.equal(DEFAULT_CONFIG.targetPostCompactTokens, 40_000);
+  assert.equal(DEFAULT_CONFIG.userMessageChars, 900);
+  assert.equal(DEFAULT_CONFIG.intentWorkflowChars, 8_000);
+  assert.equal(DEFAULT_CONFIG.gitStateChars, 4_000);
+  assert.equal(DEFAULT_CONFIG.editedFilesChars, 6_000);
+  assert.equal(DEFAULT_CONFIG.readFilesChars, 1_000);
 });
 
 test("project-style overrides merge lanes", () => {

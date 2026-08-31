@@ -302,7 +302,8 @@ Implement strict tools and Qdrant indexes.
     assert.equal(seenPrompts.filter((prompt) => prompt.includes("evidence and risk state only")).length, 1);
     assert.match(result.compaction?.summary ?? "", /## Durable Intent Workflow/);
     assert.match(result.compaction?.summary ?? "", /Implement strict tools and Qdrant indexes/);
-    assert.match(result.compaction?.summary ?? "", /# Current implementation plan/);
+    assert.match(result.compaction?.summary ?? "", /Plan: .*plan\.md/);
+    assert.doesNotMatch(result.compaction?.summary ?? "", /# Current implementation plan/);
     assert.match(result.compaction?.summary ?? "", /## Implementation State/);
     assert.match(result.compaction?.summary ?? "", /## Verification \/ Evidence State/);
     assert.doesNotMatch(result.compaction?.summary ?? "", /old unrelated history/);

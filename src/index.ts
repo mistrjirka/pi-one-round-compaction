@@ -7,14 +7,16 @@ import {
   buildLanePrompt,
   collectFileState,
   collectGitState,
+  collectUserMessageLedger,
   combineUsage,
-  deterministicMerge,
-  extractRecentUserContext,
+  computeEffectiveRecentTokenBudget,
+  fitCheckpointToTarget,
   makeOneRoundDetails,
   prepareWholeTurnCompaction,
   runLane,
   serializeExecutionView,
   serializeIntentView,
+  type DeterministicRenderBudgets,
   type DeterministicState,
   type LaneName,
   type OneRoundDetails,
@@ -109,15 +111,39 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const { config } = loaded;
     if (!config.enabled) return;
 
-    const boundary = prepareWholeTurnCompaction(event);
+    const intentLaneConfig = resolveLaneConfig(config, "intent");
+    const executionLaneConfig = resolveLaneConfig(config, "execution");
+    const maxRenderBudgets: DeterministicRenderBudgets = {
+      intentWorkflowChars: intentWorkflow.active ? config.intentWorkflowChars : 0,
+      gitStateChars: config.includeGitState ? config.gitStateChars : 0,
+      editedFilesChars: config.editedFilesChars,
+      readFilesChars: config.readFilesChars,
+      userMessagesChars: config.recentControlChars,
+    };
+    const deterministicReserveChars = Object.values(maxRenderBudgets).reduce((sum, value) => sum + value, 0);
+    const effectiveRecentTokenBudget = computeEffectiveRecentTokenBudget({
+      targetPostCompactTokens: config.targetPostCompactTokens,
+      keepRecentTokens: event.preparation.settings.keepRecentTokens,
+      // Reserve the configured maximum lane outputs up front. Actual outputs are
+      // normally much smaller; target fitting after the calls gives the unused
+      // room back to deterministic state rather than risking raw-context dominance.
+      laneOutputReserveTokens: intentLaneConfig.maxOutputTokens + executionLaneConfig.maxOutputTokens,
+      deterministicReserveChars,
+    });
+
+    const boundary = prepareWholeTurnCompaction(event, effectiveRecentTokenBudget);
     const allDiscarded = boundary.messagesToSummarize;
     if (allDiscarded.length === 0) return;
 
     const fileState = collectFileState(event, allDiscarded);
-    const recentUserContext = extractRecentUserContext(allDiscarded, config.recentControlChars);
+    const userMessages = collectUserMessageLedger(
+      event.branchEntries,
+      boundary.firstKeptEntryId,
+      config.userMessageChars,
+    );
     const deterministicWithoutGit: DeterministicState = {
       ...fileState,
-      recentUserContext,
+      userMessages,
       ...(intentWorkflow.active ? { intentWorkflow } : {}),
     };
 
@@ -133,6 +159,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       previousSummary: boundary.previousSummary,
       customInstructions: event.customInstructions,
       deterministic: deterministicWithoutGit,
+      renderBudgets: maxRenderBudgets,
       isSplitTurn: boundary.isSplitTurn,
     });
     const executionPrompt = buildLanePrompt({
@@ -142,6 +169,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       previousSummary: boundary.previousSummary,
       customInstructions: event.customInstructions,
       deterministic: deterministicWithoutGit,
+      renderBudgets: maxRenderBudgets,
       isSplitTurn: boundary.isSplitTurn,
     });
 
@@ -153,6 +181,8 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       retainedTurns: boundary.retainedTurns,
       estimatedRetainedTokens: boundary.estimatedRetainedTokens,
       keepRecentTokens: event.preparation.settings.keepRecentTokens,
+      targetPostCompactTokens: config.targetPostCompactTokens,
+      effectiveRecentTokenBudget,
       boundaryMode: boundary.boundaryMode,
       ...(intentWorkflow.active
         ? {
@@ -172,7 +202,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       ? `intent-workflow=${intentWorkflow.workstream}`
       : `intent-workflow=not detected (${intentWorkflow.reason})`;
     ctx.ui.notify(
-      `One-round compaction: 2 parallel lanes; ${workflowLabel}; keeping ${boundary.retainedTurns} complete recent turn(s) (~${boundary.estimatedRetainedTokens.toLocaleString()} tokens, budget ${event.preparation.settings.keepRecentTokens.toLocaleString()})`,
+      `One-round compaction: 2 parallel lanes; ${workflowLabel}; target ${config.targetPostCompactTokens.toLocaleString()} tokens; raw recent budget ${effectiveRecentTokenBudget.toLocaleString()} (Pi keepRecentTokens ${event.preparation.settings.keepRecentTokens.toLocaleString()}); retaining ~${boundary.estimatedRetainedTokens.toLocaleString()} tokens (${boundary.boundaryMode})`,
       "info",
     );
 
@@ -181,7 +211,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       try {
         const result = await runLane({
           lane,
-          config: resolveLaneConfig(config, lane),
+          config: lane === "intent" ? intentLaneConfig : executionLaneConfig,
           prompt,
           systemPrompt: promptSet.system,
           ctx,
@@ -211,16 +241,26 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         ...(git ? { git } : {}),
       };
       const wallTimeMs = Math.round(performance.now() - started);
-      const summary = deterministicMerge({
+      const fitted = fitCheckpointToTarget({
         intent,
         execution,
         deterministic,
+        maxRenderBudgets,
         isSplitTurn: boundary.isSplitTurn,
+        estimatedRetainedTokens: boundary.estimatedRetainedTokens,
+        targetPostCompactTokens: config.targetPostCompactTokens,
       });
+      const summary = fitted.summary;
+      const estimatedTokensAfter = fitted.estimatedTokensAfter;
       const details = makeOneRoundDetails({
         laneResults: [intent, execution],
         wallTimeMs,
         keepRecentTokens: event.preparation.settings.keepRecentTokens,
+        effectiveRecentTokenBudget,
+        targetPostCompactTokens: config.targetPostCompactTokens,
+        estimatedTokensAfter,
+        targetExceeded: fitted.targetExceeded,
+        renderBudgets: fitted.renderBudgets,
         boundaryMode: boundary.boundaryMode,
         retainedTurns: boundary.retainedTurns,
         estimatedRetainedTokens: boundary.estimatedRetainedTokens,
@@ -228,8 +268,14 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         deterministic,
       });
 
+      if (fitted.targetExceeded) {
+        ctx.ui.notify(
+          `One-round target ${config.targetPostCompactTokens.toLocaleString()} could not be met without clipping LLM summaries; preserving them intact at ~${estimatedTokensAfter.toLocaleString()} tokens`,
+          "warning",
+        );
+      }
+
       const usage = combineUsage([intent.usage, execution.usage]);
-      const estimatedTokensAfter = boundary.estimatedRetainedTokens + Math.ceil(summary.length / 4);
       progress.complete();
       return {
         compaction: {
@@ -266,7 +312,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       .map((lane) => `${lane.lane} ${lane.durationMs}ms`)
       .join(", ");
     ctx.ui.notify(
-      `One-round compacted in ${details.wallTimeMs}ms (${laneText}); kept ${details.retainedTurns} complete recent turn(s) (~${details.estimatedRetainedTokens.toLocaleString()} tokens, budget ${details.keepRecentTokens.toLocaleString()}, ${details.boundaryMode})`,
+      `One-round compacted in ${details.wallTimeMs}ms (${laneText}); estimated ${details.estimatedTokensAfter.toLocaleString()} tokens after compaction (target ${details.targetPostCompactTokens.toLocaleString()}); raw suffix ~${details.estimatedRetainedTokens.toLocaleString()} / budget ${details.effectiveRecentTokenBudget.toLocaleString()} (${details.boundaryMode})`,
       "info",
     );
   });
@@ -295,7 +341,13 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `execution: ${execution.model} thinking=${execution.thinkingLevel} maxOutput=${execution.maxOutputTokens}`,
           `toolResultChars: ${config.toolResultChars}`,
           `thinkingChars: ${config.thinkingChars}`,
-          `recentControlChars: ${config.recentControlChars}`,
+          `recentControlChars: ${config.recentControlChars} (total rendered cumulative user-ledger budget)`,
+          `userMessageChars: ${config.userMessageChars} (per compacted user message)`,
+          `targetPostCompactTokens: ${config.targetPostCompactTokens} (soft target; LLM summaries are never clipped)`,
+          `intentWorkflowChars: ${config.intentWorkflowChars}`,
+          `gitStateChars: ${config.gitStateChars}`,
+          `editedFilesChars: ${config.editedFilesChars}`,
+          `readFilesChars: ${config.readFilesChars}`,
           `preflightAutoCompact: ${config.preflightAutoCompact} (projects each idle user prompt against the active model context window)`,
           intentWorkflow.active
             ? `intent workflow: ACTIVE workstream=${intentWorkflow.workstream} plan=${Boolean(intentWorkflow.plan)} intentTruncated=${intentWorkflow.intentTruncated} planTruncated=${intentWorkflow.planTruncated}`
@@ -303,7 +355,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           intentWorkflow.active
             ? `prompts: system=${promptSet.sources.system}; implementation=${promptSet.sources.workflowImplementation}; evidence=${promptSet.sources.workflowEvidence}`
             : `prompts: system=${promptSet.sources.system}; intent=${promptSet.sources.intent}; execution=${promptSet.sources.execution}`,
-          "recent-turn budget: Pi's compaction.keepRecentTokens setting; this plugin keeps the newest complete turns that fit",
+          "recent-turn budget: balanced against targetPostCompactTokens; oversized newest turns split at safe message boundaries instead of surviving verbatim",
           `fallbackToNative: ${config.fallbackToNative} (false guarantees no sequential LLM fallback)`,
           "LLM topology: 2 calls in parallel, deterministic merge, no LLM follow-up/finalizer",
         ];
