@@ -235,6 +235,65 @@ Merged without an LLM:
 
 ## PiTTy / observability
 
+The extension is usable with unmodified vanilla Pi. Progress is observability-only: failures or unsupported UI surfaces never fail compaction.
+
+### Live progress in vanilla Pi
+
+Interactive Pi receives a normal extension status plus a live `setWidget` preview of both parallel lanes. When the provider exposes streaming events, checkpoint text appears as it is generated. If streaming is unavailable, the lane still advances through start/done/merge states and the completed lane text arrives at the end.
+
+### PiTTy / vanilla Pi RPC contract
+
+No Pi fork or custom RPC protocol is required. In `pi --mode rpc`, vanilla Pi already serializes extension `setStatus()` calls as normal JSONL `extension_ui_request` events. This extension reserves:
+
+```text
+statusKey = "pi-one-round-compaction.progress.v1"
+```
+
+For that key, `statusText` is JSON matching `CompactionProgressV1` from `src/progress.ts`. PiTTy should parse only events shaped like:
+
+```json
+{
+  "type": "extension_ui_request",
+  "method": "setStatus",
+  "statusKey": "pi-one-round-compaction.progress.v1",
+  "statusText": "{...JSON payload...}"
+}
+```
+
+The payload is versioned (`v: 1`) and includes:
+
+- `runId` and monotonically increasing `seq`
+- `phase`: `preparing | streaming | merging | complete | error | aborted`
+- `mode`: `normal | workflow`
+- compaction reason and retained-turn/token-budget metadata
+- active intent-workflow workstream/plan state when applicable
+- both lanes' semantic `role`, `state`, output `chars`, elapsed time, and optional `delta`
+- an error string for terminal failures
+
+`delta` contains only text produced since the previous progress frame, so PiTTy can append it per `runId`/lane without repeatedly receiving the full checkpoint. Frames are throttled to roughly 8 Hz. If true provider streaming is unavailable, the completed lane is emitted as one final `delta`, so the client contract is the same.
+
+A minimal PiTTy state machine is:
+
+```text
+compaction_start
+  -> watch extension_ui_request/setStatus with the reserved statusKey
+  -> group by runId
+  -> ignore seq <= lastSeq
+  -> append lanes.<lane>.delta when present
+  -> render phase/lane state/timers
+  -> on complete/error/aborted keep or collapse the preview
+compaction_end
+  -> replace preview with the authoritative persisted summary/details
+```
+
+When `statusText` becomes undefined, vanilla Pi is clearing the temporary progress status; it is not a failure. RPC mode intentionally does not send repeated full `setWidget` previews, keeping the JSONL stream compact for PiTTy.
+
+For in-process extensions/SDK hosts, the same payload is additionally emitted on Pi's extension event bus channel:
+
+```text
+pi-one-round-compaction:progress
+```
+
 The returned compaction entry stores structured `details` with:
 
 - plugin/version marker
@@ -248,7 +307,7 @@ The returned compaction entry stores structured `details` with:
 - git state
 - intent-workflow active/inactive status, workstream, plan presence, and truncation flags
 
-The standard compaction entry also contains combined `usage`, `tokensBefore`, `estimatedTokensAfter`, and the actual `summary`. PiTTy can render these directly from the `session_compact` event; no terminal-log parsing is needed.
+The standard compaction entry also contains combined `usage`, `tokensBefore`, `estimatedTokensAfter`, and the actual `summary`. PiTTy should treat the final `session_compact`/`compaction_end` data as authoritative and the live progress stream only as transient UI state.
 
 ## Development checks
 

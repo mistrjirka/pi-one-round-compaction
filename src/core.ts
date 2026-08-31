@@ -6,6 +6,7 @@ import {
   type AssistantMessage,
   type Message,
   type Model,
+  type ProviderStreamOptions,
   type Usage,
   uuidv7,
 } from "@earendil-works/pi-ai";
@@ -535,6 +536,7 @@ export async function runLane(params: {
   systemPrompt: string;
   ctx: ExtensionContext;
   signal: AbortSignal;
+  onTextDelta?: (delta: string) => void;
 }): Promise<LaneResult> {
   const reference = parseModelReference(params.config.model);
   if (!reference) throw new Error(`Invalid model reference '${params.config.model}'; expected provider/model`);
@@ -543,29 +545,69 @@ export async function runLane(params: {
 
   const reasoningEffort = reasoningEffortFor(model, params.config.thinkingLevel);
   const started = performance.now();
-  const options: Record<string, unknown> = {
+  const requestContext = {
+    systemPrompt: params.systemPrompt,
+    messages: [
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: params.prompt }],
+        timestamp: Date.now(),
+      },
+    ],
+  };
+  const baseOptions: ProviderStreamOptions = {
     maxTokens: Math.min(params.config.maxOutputTokens, model.maxTokens || params.config.maxOutputTokens),
     signal: params.signal,
     cacheRetention: "none",
     sessionId: uuidv7(),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
-  if (reasoningEffort) options.reasoningEffort = reasoningEffort;
 
-  const response = await params.ctx.modelRegistry.complete(
-    model,
-    {
-      systemPrompt: params.systemPrompt,
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: params.prompt }],
-          timestamp: Date.now(),
-        },
-      ],
-    },
-    options,
-  );
+  let response: AssistantMessage | undefined;
+  const registryRuntime = params.ctx.modelRegistry as unknown as Record<string, unknown>;
+  const canObserveStream =
+    Boolean(params.onTextDelta) &&
+    typeof registryRuntime.getProvider === "function" &&
+    typeof registryRuntime.getApiKeyAndHeaders === "function";
 
+  if (!canObserveStream) {
+    // Streaming progress is optional. Older/alternate vanilla Pi hosts can use
+    // the stable completion facade and still expose lane start/done/merge state.
+    response = await params.ctx.modelRegistry.complete(model, requestContext, baseOptions);
+  } else {
+    // Current Pi's ModelRegistry exposes complete() but not stream(). Its public
+    // provider/auth accessors let us invoke the same composed provider and observe
+    // text deltas. ModelRuntime.complete() itself is stream(...).result().
+    const provider = params.ctx.modelRegistry.getProvider(model.provider);
+    if (!provider) throw new Error(`Provider not found: ${model.provider}`);
+    const auth = await params.ctx.modelRegistry.getApiKeyAndHeaders(model);
+    if (!auth.ok) throw new Error(`${params.lane} lane auth failed: ${auth.error}`);
+
+    const requestModel = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
+    const options: ProviderStreamOptions = {
+      ...baseOptions,
+      ...(auth.apiKey !== undefined ? { apiKey: auth.apiKey } : {}),
+      ...(auth.headers !== undefined ? { headers: auth.headers } : {}),
+      ...(auth.env !== undefined ? { env: auth.env } : {}),
+    };
+
+    const stream = provider.stream(requestModel, requestContext, options);
+    for await (const event of stream) {
+      if (event.type === "text_delta") {
+        params.onTextDelta?.(event.delta);
+        continue;
+      }
+      if (event.type === "done") {
+        response = event.message;
+        continue;
+      }
+      if (event.type === "error") {
+        response = event.error;
+      }
+    }
+
+    if (!response) throw new Error(`${params.lane} lane stream ended without a final response`);
+  }
   if (params.signal.aborted || response.stopReason === "aborted") {
     throw new Error(`${params.lane} lane aborted`);
   }

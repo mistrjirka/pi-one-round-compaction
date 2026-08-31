@@ -16,8 +16,10 @@ import {
   serializeExecutionView,
   serializeIntentView,
   type DeterministicState,
+  type LaneName,
   type OneRoundDetails,
 } from "./core.js";
+import { createProgressReporter } from "./progress.js";
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -86,6 +88,28 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       isSplitTurn: boundary.isSplitTurn,
     });
 
+    const progress = createProgressReporter({
+      pi,
+      ctx,
+      mode: intentWorkflow.active ? "workflow" : "normal",
+      reason: event.reason,
+      retainedTurns: boundary.retainedTurns,
+      estimatedRetainedTokens: boundary.estimatedRetainedTokens,
+      keepRecentTokens: event.preparation.settings.keepRecentTokens,
+      boundaryMode: boundary.boundaryMode,
+      ...(intentWorkflow.active
+        ? {
+            intentWorkflow: {
+              workstream: intentWorkflow.workstream,
+              hasPlan: Boolean(intentWorkflow.plan),
+            },
+          }
+        : {}),
+      roles: intentWorkflow.active
+        ? { intent: "implementation", execution: "evidence" }
+        : { intent: "intent", execution: "execution" },
+    });
+
     const started = performance.now();
     const workflowLabel = intentWorkflow.active
       ? `intent-workflow=${intentWorkflow.workstream}`
@@ -95,29 +119,36 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       "info",
     );
 
+    const runTrackedLane = async (lane: LaneName, prompt: string) => {
+      progress.laneStart(lane);
+      try {
+        const result = await runLane({
+          lane,
+          config: resolveLaneConfig(config, lane),
+          prompt,
+          systemPrompt: promptSet.system,
+          ctx,
+          signal: event.signal,
+          onTextDelta: (delta) => progress.laneDelta(lane, delta),
+        });
+        progress.laneDone(lane, result.text);
+        return result;
+      } catch (error) {
+        progress.laneError(lane, formatError(error));
+        throw error;
+      }
+    };
+
     try {
       // Exactly one LLM round: neither lane consumes the other lane's output.
       // Git inspection is deterministic and runs concurrently with both calls.
       const [intent, execution, git] = await Promise.all([
-        runLane({
-          lane: "intent",
-          config: resolveLaneConfig(config, "intent"),
-          prompt: intentPrompt,
-          systemPrompt: promptSet.system,
-          ctx,
-          signal: event.signal,
-        }),
-        runLane({
-          lane: "execution",
-          config: resolveLaneConfig(config, "execution"),
-          prompt: executionPrompt,
-          systemPrompt: promptSet.system,
-          ctx,
-          signal: event.signal,
-        }),
+        runTrackedLane("intent", intentPrompt),
+        runTrackedLane("execution", executionPrompt),
         config.includeGitState ? collectGitState(ctx.cwd) : Promise.resolve(undefined),
       ]);
 
+      progress.merging();
       const deterministic: DeterministicState = {
         ...deterministicWithoutGit,
         ...(git ? { git } : {}),
@@ -142,6 +173,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
 
       const usage = combineUsage([intent.usage, execution.usage]);
       const estimatedTokensAfter = boundary.estimatedRetainedTokens + Math.ceil(summary.length / 4);
+      progress.complete();
       return {
         compaction: {
           summary,
@@ -153,14 +185,20 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         },
       };
     } catch (error) {
-      if (event.signal.aborted) return;
+      if (event.signal.aborted) {
+        progress.abort();
+        return;
+      }
       const message = `One-round compaction failed: ${formatError(error)}`;
+      progress.fail(message);
       if (config.fallbackToNative) {
         ctx.ui.notify(`${message}. Falling back to Pi native compaction.`, "warning");
         return;
       }
       ctx.ui.notify(message, "error");
       return { cancel: true };
+    } finally {
+      progress.clear();
     }
   });
 
