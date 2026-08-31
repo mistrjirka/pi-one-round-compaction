@@ -1,0 +1,152 @@
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+
+import oneRoundCompaction from "../src/index.js";
+import { emptyUsageForTests } from "../src/core.js";
+
+function user(content: string) {
+  return { role: "user" as const, content, timestamp: Date.now() };
+}
+
+function assistant(text: string) {
+  return {
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text }],
+    api: "openai-responses" as const,
+    provider: "test",
+    model: "test",
+    usage: emptyUsageForTests(),
+    stopReason: "stop" as const,
+    timestamp: Date.now(),
+  };
+}
+
+function entry(id: string, message: ReturnType<typeof user> | ReturnType<typeof assistant>) {
+  return {
+    type: "message" as const,
+    id,
+    parentId: null,
+    timestamp: new Date().toISOString(),
+    message,
+  };
+}
+
+test("extension launches exactly two LLM lanes concurrently and deterministically merges them", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-test-"));
+  const agentDir = path.join(root, "agent");
+  const cwd = path.join(root, "repo");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+
+  try {
+    const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+    const fakePi = {
+      on(name: string, handler: (event: unknown, ctx: unknown) => unknown) {
+        const list = handlers.get(name) ?? [];
+        list.push(handler);
+        handlers.set(name, list);
+      },
+      registerCommand() {},
+    };
+    oneRoundCompaction(fakePi as never);
+
+    const beforeCompact = handlers.get("session_before_compact")?.[0];
+    assert.ok(beforeCompact);
+
+    const model = {
+      id: "muse-spark-1.2-contributor",
+      name: "Muse Spark 1.2 Contributor",
+      api: "openai-responses",
+      provider: "opencode-go",
+      baseUrl: "https://example.invalid",
+      reasoning: true,
+      thinkingLevelMap: { low: "low" },
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1_048_576,
+      maxTokens: 131_072,
+    };
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let calls = 0;
+    const fakeCtx = {
+      cwd,
+      isProjectTrusted: () => false,
+      ui: { notify() {} },
+      modelRegistry: {
+        find(provider: string, modelId: string) {
+          return provider === model.provider && modelId === model.id ? model : undefined;
+        },
+        async complete(_model: unknown, request: { messages: Array<{ content: Array<{ text?: string }> }> }) {
+          calls++;
+          inFlight++;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          inFlight--;
+          const prompt = request.messages[0]?.content[0]?.text ?? "";
+          const text = prompt.includes("Current Objective")
+            ? "## Current Objective\nCurrent plan\n\n## Accepted Plan / Scope\n- Do the work\n\n## Constraints / Exclusions / User Corrections\n- Do not touch UI"
+            : "## Done\n- inspected\n\n## Current Code / Repository State\n- backend\n\n## Verification State\n- NOT RUN\n\n## Adjustments / Discoveries\n- none\n\n## Remaining / Immediate Next Actions\n1. implement";
+          return {
+            role: "assistant",
+            content: [{ type: "text", text }],
+            api: "openai-responses",
+            provider: model.provider,
+            model: model.id,
+            usage: emptyUsageForTests(),
+            stopReason: "stop",
+            timestamp: Date.now(),
+          };
+        },
+      },
+    };
+
+    const branchEntries = [
+      entry("u1", user(`old-${"x".repeat(120)}`)),
+      entry("a1", assistant(`old-${"x".repeat(120)}`)),
+      entry("u2", user(`middle-${"x".repeat(120)}`)),
+      entry("a2", assistant(`middle-${"x".repeat(120)}`)),
+      entry("u3", user(`recent-${"x".repeat(120)}`)),
+      entry("a3", assistant(`recent-${"x".repeat(120)}`)),
+    ];
+    const event = {
+      branchEntries,
+      preparation: {
+        firstKeptEntryId: "a3",
+        messagesToSummarize: [user("native prefix")],
+        turnPrefixMessages: [],
+        isSplitTurn: false,
+        tokensBefore: 500,
+        previousSummary: undefined,
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+        settings: { enabled: true, reserveTokens: 16_384, keepRecentTokens: 80 },
+      },
+      customInstructions: undefined,
+      reason: "threshold",
+      willRetry: false,
+      signal: new AbortController().signal,
+    };
+
+    const result = await beforeCompact(event as never, fakeCtx as never) as {
+      compaction?: { summary: string; details: { plugin: string; lanes: unknown[] }; estimatedTokensAfter?: number };
+    };
+
+    assert.equal(calls, 2);
+    assert.equal(maxInFlight, 2);
+    assert.equal(result.compaction?.details.plugin, "pi-one-round-compaction");
+    assert.equal(result.compaction?.details.lanes.length, 2);
+    assert.match(result.compaction?.summary ?? "", /## Task Semantics/);
+    assert.match(result.compaction?.summary ?? "", /## Execution State/);
+    assert.ok((result.compaction?.estimatedTokensAfter ?? 0) > 0);
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  }
+});
