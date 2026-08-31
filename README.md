@@ -45,32 +45,143 @@ The extension uses Pi's public `session_before_compact`, `session_compact`, mode
 
 The design follows the practical pattern seen in coding-agent context work: preserve current task semantics separately from execution state, prune low-value tool output, keep recent context verbatim, and preserve deterministic state outside the summarizer. The intent and execution lanes have disjoint responsibilities so they can be merged without a third LLM call.
 
-## Important: remove other compaction overrides
+## Installation
 
-Do not run another extension that returns a `session_before_compact` result at the same time. Pi executes all handlers and a later returned compaction can replace an earlier one.
+### Requirements
 
-For example, remove `pi-custom-compaction` before using this package:
+- Pi Coding Agent `>= 0.84.0` (verified with `0.84.4`)
+- Node.js `>= 22.19.0`
+- access to the configured compaction model (the default is `opencode-go/muse-spark-1.2-contributor`)
+
+### 1. Remove another compaction override
+
+Only one extension should return a `session_before_compact` result. If you currently use `pi-custom-compaction`, remove it first:
 
 ```bash
 pi remove npm:pi-custom-compaction
 ```
 
-Use `pi list` first if your installed package has a different source/name.
-
-## Install from a local checkout
+If you are unsure what is installed:
 
 ```bash
-pi install /absolute/path/to/pi-one-round-compaction
+pi list
 ```
 
-Pi also supports a git URL once this repository is hosted.
+Removing the other compaction extension does **not** remove Pi's native compaction settings such as `compaction.keepRecentTokens`.
 
-Then run inside Pi:
+### 2. Install this extension
+
+Recommended: install the tagged release directly from GitHub:
+
+```bash
+pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.0
+```
+
+To follow the latest `main` instead:
+
+```bash
+pi install git:github.com/mistrjirka/pi-one-round-compaction
+```
+
+Pi also accepts the SSH form:
+
+```bash
+pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.0
+```
+
+For development from a local checkout:
+
+```bash
+git clone https://github.com/mistrjirka/pi-one-round-compaction.git
+cd pi-one-round-compaction
+npm install
+pi install "$PWD"
+```
+
+By default `pi install` writes the package to your user Pi settings. Add `-l` if you intentionally want a project-local installation.
+
+### 3. Reload Pi and verify
+
+Inside Pi run:
 
 ```text
 /reload
 /one-round-compaction
 ```
+
+`/one-round-compaction` should show the effective configuration, both LLM lanes, prompt sources, recent-turn retention settings, and whether the intent workflow is active for the current project.
+
+The default compaction model is:
+
+```text
+opencode-go/muse-spark-1.2-contributor
+thinking: low
+```
+
+If that provider/model is not available in your Pi setup, configure another model as described below before triggering compaction.
+
+### 4. Choose how much recent context stays verbatim
+
+The extension uses Pi's normal `compaction.keepRecentTokens` setting as a **budget for the newest complete turns**. For example, in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "compaction": {
+    "keepRecentTokens": 32000
+  }
+}
+```
+
+The plugin does not replace Pi's trigger settings. Pi still decides *when* automatic compaction runs; this extension replaces *how* the old prefix is compacted.
+
+### 5. Optional plugin configuration
+
+No plugin config file is required for the default setup. To override the model or other options, create:
+
+```text
+~/.pi/agent/one-round-compaction.json
+```
+
+For example:
+
+```json
+{
+  "model": "opencode-go/muse-spark-1.2-contributor",
+  "thinkingLevel": "low",
+  "lanes": {
+    "intent": {
+      "maxOutputTokens": 3072
+    },
+    "execution": {
+      "maxOutputTokens": 6144
+    }
+  }
+}
+```
+
+Then run `/reload` again.
+
+### Updating
+
+If you installed the unpinned Git source, update extensions normally with Pi:
+
+```bash
+pi update --extensions
+```
+
+A pinned install such as `@v0.3.0` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
+
+```bash
+pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
+```
+
+### Uninstalling
+
+```bash
+pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.0
+```
+
+If Pi reports that the source string differs, run `pi list` and remove the exact listed package source.
 
 ## Configuration
 
