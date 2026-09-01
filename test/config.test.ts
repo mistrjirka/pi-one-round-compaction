@@ -9,7 +9,11 @@ test("defaults use Muse Spark low", () => {
   assert.equal(DEFAULT_CONFIG.thinkingChars, 0);
   assert.equal(DEFAULT_CONFIG.preflightAutoCompact, true);
   assert.equal(DEFAULT_CONFIG.targetPostCompactTokens, 40_000);
-  assert.equal(DEFAULT_CONFIG.userMessageChars, 900);
+  assert.equal(DEFAULT_CONFIG.userMessageChars, 2_000);
+  assert.equal(DEFAULT_CONFIG.userArtifactThresholdChars, 8_000);
+  assert.equal(DEFAULT_CONFIG.userArtifactPreviewChars, 600);
+  assert.equal(DEFAULT_CONFIG.userArtifactCandidateChars, 12_000);
+  assert.equal(DEFAULT_CONFIG.userArtifactReferenceChars, 4_000);
   assert.equal(DEFAULT_CONFIG.intentWorkflowChars, 8_000);
   assert.equal(DEFAULT_CONFIG.gitStateChars, 4_000);
   assert.equal(DEFAULT_CONFIG.editedFilesChars, 6_000);

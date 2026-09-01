@@ -24,6 +24,7 @@ import {
 import type { OneRoundCompactionConfig, ThinkingLevel } from "./config.js";
 import { renderIntentWorkflow, type ActiveIntentWorkflow } from "./intent-workflow.js";
 import { SPLIT_TURN_NOTE } from "./prompts.js";
+import { renderDurableUserReferences, type DurableUserReference, type UserArtifactRecord } from "./user-artifacts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,6 +66,7 @@ export interface DeterministicRenderBudgets {
   editedFilesChars: number;
   readFilesChars: number;
   userMessagesChars: number;
+  userArtifactReferencesChars: number;
 }
 
 export interface DeterministicState {
@@ -75,14 +77,20 @@ export interface DeterministicState {
   /** Trace-local paths ordered newest touch first; these are what the checkpoint renders. */
   traceReadFiles: string[];
   traceEditedFiles: string[];
-  /** Cumulative user ledger up to the current compaction boundary. */
+  /** Cumulative HUMAN user ledger up to the current compaction boundary. */
   userMessages: UserMessageLedgerEntry[];
+  /** LLM-selected references to exact oversized human messages kept out-of-context. */
+  durableUserReferences?: DurableUserReference[];
+  /** Runtime manifest metadata; only IDs/references are persisted in compaction details. */
+  userArtifacts?: UserArtifactRecord[];
+  /** Preserve catalog identity even if sidecar loading is temporarily unavailable. */
+  knownUserArtifactIds?: string[];
   intentWorkflow?: ActiveIntentWorkflow;
 }
 
 export interface OneRoundDetails {
   plugin: "pi-one-round-compaction";
-  version: 3;
+  version: 4;
   lanes: Array<{
     lane: LaneName;
     model: string;
@@ -105,6 +113,8 @@ export interface OneRoundDetails {
   traceReadFiles: string[];
   traceEditedFiles: string[];
   userMessages: UserMessageLedgerEntry[];
+  knownUserArtifactIds: string[];
+  durableUserReferences: DurableUserReference[];
   renderBudgets: DeterministicRenderBudgets;
   git?: GitState;
   intentWorkflow: {
@@ -137,6 +147,7 @@ type PromptBuildInput = {
   deterministic: DeterministicState;
   renderBudgets: DeterministicRenderBudgets;
   isSplitTurn: boolean;
+  userArtifactCandidates?: string;
 };
 
 function clip(text: string, maxChars: number): string {
@@ -153,15 +164,20 @@ function serializeToolCallArguments(value: unknown, maxChars = 3000): string {
   }
 }
 
+function convertedMessageText(message: CompactionMessage): string {
+  const converted = convertToLlm([message])[0];
+  return converted ? contentText(converted.content, "").trim() : "";
+}
+
 /**
- * High-signal view for the task-semantics lane: user text and concise assistant
- * conclusions, with tool output and hidden reasoning omitted.
+ * High-signal view for the task-semantics lane. Only native human role=user
+ * messages count as user instructions; Pi custom/subagent/bash/summary messages
+ * are deliberately omitted even though convertToLlm() maps them to LLM role=user.
  */
 export function serializeIntentView(messages: Parameters<typeof convertToLlm>[0]): string {
-  const llmMessages = convertToLlm(messages);
   const parts: string[] = [];
 
-  for (const message of llmMessages) {
+  for (const message of messages) {
     if (message.role === "user") {
       const text = contentText(message.content, "").trim();
       if (text) parts.push(`[User]: ${text}`);
@@ -182,18 +198,19 @@ export function serializeIntentView(messages: Parameters<typeof convertToLlm>[0]
 }
 
 /**
- * Execution-oriented view. Tool outputs are capped and old hidden reasoning is
- * omitted by default; both controls are configurable.
+ * Execution-oriented view. Native user messages remain authoritative. Generated
+ * extension/custom/bash/summary messages are evidence, never mislabeled as human,
+ * and are bounded like tool results so background workflow payloads cannot dominate
+ * the compaction request.
  */
 export function serializeExecutionView(
   messages: Parameters<typeof convertToLlm>[0],
   toolResultChars: number,
   thinkingChars: number,
 ): string {
-  const llmMessages = convertToLlm(messages);
   const parts: string[] = [];
 
-  for (const message of llmMessages) {
+  for (const message of messages) {
     if (message.role === "user") {
       const text = contentText(message.content, "").trim();
       if (text) parts.push(`[User]: ${text}`);
@@ -226,6 +243,24 @@ export function serializeExecutionView(
     if (message.role === "toolResult") {
       const text = contentText(message.content, "").trim();
       if (text) parts.push(`[Tool result]: ${clip(text, toolResultChars)}`);
+      continue;
+    }
+
+    if (message.role === "custom") {
+      const text = convertedMessageText(message);
+      if (text) parts.push(`[Extension message${message.customType ? `: ${message.customType}` : ""}]: ${clip(text, toolResultChars)}`);
+      continue;
+    }
+
+    if (message.role === "bashExecution") {
+      const text = convertedMessageText(message);
+      if (text) parts.push(`[Bash execution]: ${clip(text, toolResultChars)}`);
+      continue;
+    }
+
+    if (message.role === "branchSummary" || message.role === "compactionSummary") {
+      const text = convertedMessageText(message);
+      if (text) parts.push(`[Prior summary evidence]: ${clip(text, Math.max(toolResultChars, 3500))}`);
     }
   }
 
@@ -306,11 +341,29 @@ export function collectUserMessageLedger(
     ledger.push(entry);
   };
 
-  // Details v3 carries the cumulative ledger explicitly. This protects history
-  // even if a future Pi SessionManager stops exposing pre-compaction raw entries.
+  // Prefer exact persisted human messages when Pi still exposes the raw branch.
+  // This also lets a later increase of userMessageChars recover a richer preview
+  // instead of being permanently limited by an older checkpoint's smaller cap.
+  for (let i = 0; i < end; i++) {
+    const entry = branchEntries[i]!;
+    if (entry.type !== "message" || entry.message.role !== "user") continue;
+    const fallbackTimestamp = Date.parse(entry.timestamp) || 0;
+    const text = contentText(entry.message.content, "").trim();
+    if (!text) continue;
+    const capped = capUserMessage(text, perMessageChars);
+    add({
+      timestamp: typeof entry.message.timestamp === "number" ? entry.message.timestamp : fallbackTimestamp,
+      ...capped,
+    });
+  }
+
+  // v4 details are a fallback for a future Pi that no longer exposes older raw
+  // entries. Never consume v3 details: v3 accidentally admitted custom/subagent
+  // notifications after convertToLlm() mapped them to role=user.
   for (let i = 0; i < end; i++) {
     const entry = branchEntries[i]!;
     if (entry.type !== "compaction" || !isObject(entry.details)) continue;
+    if (entry.details.plugin !== "pi-one-round-compaction" || entry.details.version !== 4) continue;
     const prior = entry.details.userMessages;
     if (!Array.isArray(prior)) continue;
     for (const value of prior) {
@@ -322,23 +375,6 @@ export function collectUserMessageLedger(
         timestamp,
         ...capped,
         trimmed: value.trimmed === true || capped.trimmed,
-      });
-    }
-  }
-
-  // Also reconstruct from the persisted raw branch. Current Pi keeps those entries,
-  // so this is exact and works when upgrading from details v1/v2.
-  for (let i = 0; i < end; i++) {
-    const entry = branchEntries[i]!;
-    const fallbackTimestamp = Date.parse(entry.timestamp) || 0;
-    for (const message of convertToLlm(entryMessagesForCompaction(entry))) {
-      if (message.role !== "user") continue;
-      const text = contentText(message.content, "").trim();
-      if (!text) continue;
-      const capped = capUserMessage(text, perMessageChars);
-      add({
-        timestamp: typeof message.timestamp === "number" ? message.timestamp : fallbackTimestamp,
-        ...capped,
       });
     }
   }
@@ -803,8 +839,25 @@ function renderUserMessageLedger(entries: UserMessageLedgerEntry[], maxChars: nu
   }
 
   const availableBodies = maxChars - structural;
-  const bodyChars = Math.min(900, Math.max(1, Math.floor(availableBodies / entries.length)));
-  const lines = entries.map((entry, index) => `${prefixes[index]}${renderUserMessageBody(entry, bodyChars)}`);
+  // First give every genuine user message a useful minimum, then distribute the
+  // rest from newest to oldest toward each message's configured per-message cap.
+  // Short messages stay intact instead of being forced to the same width as giant pasted plans.
+  const minimum = Math.min(260, Math.max(1, Math.floor(availableBodies / entries.length)));
+  const allocations = entries.map((entry) => Math.min(minimum, entry.text.length));
+  let remaining = availableBodies - allocations.reduce((sum, value) => sum + value, 0);
+  while (remaining > 0) {
+    let changed = false;
+    for (let i = entries.length - 1; i >= 0 && remaining > 0; i--) {
+      const wanted = entries[i]!.text.length;
+      if (allocations[i]! >= wanted) continue;
+      const add = Math.min(64, wanted - allocations[i]!, remaining);
+      allocations[i] = allocations[i]! + add;
+      remaining -= add;
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  const lines = entries.map((entry, index) => `${prefixes[index]}${renderUserMessageBody(entry, allocations[index]!)}`);
   return [heading, ...lines].join("\n");
 }
 
@@ -831,6 +884,15 @@ function renderDeterministicState(
   if (read) sections.push(read);
   const users = renderUserMessageLedger(state.userMessages, budgets.userMessagesChars);
   if (users) sections.push(users);
+  const durableSources = renderDurableUserReferences({
+    references: state.durableUserReferences ?? [],
+    artifacts: state.userArtifacts ?? [],
+    maxChars: budgets.userArtifactReferencesChars,
+  });
+  if (durableSources) sections.push(durableSources);
+  if (budgets.userArtifactReferencesChars > 0 && (state.knownUserArtifactIds?.length ?? state.userArtifacts?.length ?? 0) > 0 && !durableSources) {
+    sections.push("### Archived oversized user sources\nExact oversized human messages remain searchable with `user_artifact` even when no source is currently active in the checkpoint.");
+  }
   return sections.join("\n\n");
 }
 
@@ -896,6 +958,10 @@ export function buildLanePrompt(input: PromptBuildInput): string {
         planChars: Math.min(2_500, Math.floor(input.renderBudgets.intentWorkflowChars * 0.35)),
       })}`,
     );
+  }
+
+  if (input.lane === "intent" && input.userArtifactCandidates?.trim()) {
+    sections.push(`## Oversized human user-source candidates\n${input.userArtifactCandidates.trim()}`);
   }
 
   const deterministic = renderDeterministicState(input.deterministic, input.renderBudgets);
@@ -1133,6 +1199,9 @@ function budgetFloors(state: DeterministicState, max: DeterministicRenderBudgets
     editedFilesChars: state.traceEditedFiles.length > 0 ? Math.min(max.editedFilesChars, 1_200) : 0,
     readFilesChars: state.traceReadFiles.length > 0 ? Math.min(max.readFilesChars, 240) : 0,
     userMessagesChars: state.userMessages.length > 0 ? Math.min(max.userMessagesChars, 3_000) : 0,
+    userArtifactReferencesChars: (state.knownUserArtifactIds?.length ?? state.userArtifacts?.length ?? 0) > 0
+      ? Math.min(max.userArtifactReferencesChars, 1_000)
+      : 0,
   };
 }
 
@@ -1148,6 +1217,7 @@ function interpolateBudgets(
     editedFilesChars: pick(floors.editedFilesChars, max.editedFilesChars),
     readFilesChars: pick(floors.readFilesChars, max.readFilesChars),
     userMessagesChars: pick(floors.userMessagesChars, max.userMessagesChars),
+    userArtifactReferencesChars: pick(floors.userArtifactReferencesChars, max.userArtifactReferencesChars),
   };
 }
 
@@ -1246,7 +1316,7 @@ export function makeOneRoundDetails(params: {
 }): OneRoundDetails {
   return {
     plugin: "pi-one-round-compaction",
-    version: 3,
+    version: 4,
     lanes: params.laneResults.map((result) => ({
       lane: result.lane,
       model: result.model,
@@ -1270,6 +1340,8 @@ export function makeOneRoundDetails(params: {
     traceReadFiles: params.deterministic.traceReadFiles,
     traceEditedFiles: params.deterministic.traceEditedFiles,
     userMessages: params.deterministic.userMessages,
+    knownUserArtifactIds: params.deterministic.knownUserArtifactIds ?? (params.deterministic.userArtifacts ?? []).map((artifact) => artifact.id),
+    durableUserReferences: params.deterministic.durableUserReferences ?? [],
     ...(params.deterministic.git ? { git: params.deterministic.git } : {}),
     intentWorkflow: params.deterministic.intentWorkflow
       ? {

@@ -79,6 +79,37 @@ test("intent view omits tool results and keeps user semantics", () => {
   assert.doesNotMatch(text, /huge implementation detail/);
 });
 
+test("intent view excludes synthetic extension messages even though Pi maps them to LLM user role", () => {
+  const messages = [
+    user("real user requirement"),
+    {
+      role: "custom" as const,
+      customType: "pi-subagents",
+      content: "Background task completed: synthetic status",
+      display: true,
+      timestamp: Date.now(),
+    },
+    assistant("working"),
+  ];
+  const text = serializeIntentView(messages as never);
+  assert.match(text, /real user requirement/);
+  assert.doesNotMatch(text, /Background task completed/);
+});
+
+test("execution view labels and truncates extension messages as evidence rather than user input", () => {
+  const messages = [{
+    role: "custom" as const,
+    customType: "pi-subagents",
+    content: `Background task completed: ${"x".repeat(500)}`,
+    display: true,
+    timestamp: Date.now(),
+  }];
+  const text = serializeExecutionView(messages as never, 80, 0);
+  assert.match(text, /^\[Extension message: pi-subagents\]: Background task completed:/);
+  assert.match(text, /chars omitted/);
+  assert.ok(text.length < 180);
+});
+
 test("execution view truncates tool results", () => {
   const messages = [
     user("Do it"),
@@ -283,6 +314,7 @@ test("deterministic merge keeps lane domains separate and appends state", () => 
       editedFilesChars: 2000,
       readFilesChars: 0,
       userMessagesChars: 2000,
+      userArtifactReferencesChars: 0,
     },
     isSplitTurn: false,
   });
@@ -329,7 +361,7 @@ test("cumulative user ledger spans earlier compaction boundaries and caps each m
   assert.equal(ledger[1]?.text, "second request");
 });
 
-test("cumulative user ledger deduplicates v3 details against still-present raw history", () => {
+test("cumulative user ledger ignores legacy v3 details and reconstructs genuine raw users", () => {
   const timestamp = Date.now();
   const original = "q".repeat(1_200);
   const rawUser = { role: "user" as const, content: original, timestamp };
@@ -360,6 +392,27 @@ test("cumulative user ledger deduplicates v3 details against still-present raw h
   assert.equal(ledger.length, 2);
   assert.equal(ledger.filter((entry) => entry.originalChars === 1_200).length, 1);
   assert.match(ledger[0]?.text ?? "", /TRIMMED: original 1,200 chars/);
+});
+
+test("cumulative user ledger excludes custom/subagent notifications converted to LLM user role", () => {
+  const timestamp = Date.now();
+  const entries = [
+    messageEntry("u1", { role: "user" as const, content: "real human request", timestamp }),
+    {
+      type: "custom_message" as const,
+      id: "cm1",
+      parentId: "u1",
+      timestamp: new Date(timestamp + 1).toISOString(),
+      customType: "pi-subagents",
+      content: "Background task completed: implementer\nSubagent progress update.",
+      display: true,
+    },
+    messageEntry("a1", assistant("done")),
+    messageEntry("u2", user("kept raw")),
+  ];
+  const ledger = collectUserMessageLedger(entries as never, "u2", 900);
+  assert.deepEqual(ledger.map((entry) => entry.text), ["real human request"]);
+  assert.doesNotMatch(ledger.map((entry) => entry.text).join("\n"), /Background task|Subagent progress/);
 });
 
 test("previous checkpoint prompt carry-forward drops stale deterministic copies", () => {
@@ -420,6 +473,7 @@ test("target fitting preserves both LLM summaries and balances deterministic cat
       editedFilesChars: 6000,
       readFilesChars: 1000,
       userMessagesChars: 16000,
+      userArtifactReferencesChars: 0,
     },
     isSplitTurn: false,
     estimatedRetainedTokens: 6_000,
@@ -501,6 +555,7 @@ test("40k target collapses a roughly 150k-token tool-heavy turn without clipping
       editedFilesChars: 6_000,
       readFilesChars: 1_000,
       userMessagesChars: 16_000,
+      userArtifactReferencesChars: 0,
     },
     isSplitTurn: boundary.isSplitTurn,
     estimatedRetainedTokens: boundary.estimatedRetainedTokens,

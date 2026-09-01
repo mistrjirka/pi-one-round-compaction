@@ -21,6 +21,10 @@ export interface OneRoundCompactionConfig {
   thinkingChars: number;
   recentControlChars: number;
   userMessageChars: number;
+  userArtifactThresholdChars: number;
+  userArtifactPreviewChars: number;
+  userArtifactCandidateChars: number;
+  userArtifactReferenceChars: number;
   targetPostCompactTokens: number;
   intentWorkflowChars: number;
   gitStateChars: number;
@@ -43,7 +47,11 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   toolResultChars: 2000,
   thinkingChars: 0,
   recentControlChars: 16000,
-  userMessageChars: 900,
+  userMessageChars: 2000,
+  userArtifactThresholdChars: 8000,
+  userArtifactPreviewChars: 600,
+  userArtifactCandidateChars: 12000,
+  userArtifactReferenceChars: 4000,
   targetPostCompactTokens: 40000,
   intentWorkflowChars: 8000,
   gitStateChars: 4000,
@@ -133,6 +141,10 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     "thinkingChars",
     "recentControlChars",
     "userMessageChars",
+    "userArtifactThresholdChars",
+    "userArtifactPreviewChars",
+    "userArtifactCandidateChars",
+    "userArtifactReferenceChars",
     "targetPostCompactTokens",
     "intentWorkflowChars",
     "gitStateChars",
@@ -169,6 +181,10 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     thinkingChars: parseNonNegativeInt(value.thinkingChars, "thinkingChars", base.thinkingChars),
     recentControlChars: parseNonNegativeInt(value.recentControlChars, "recentControlChars", base.recentControlChars),
     userMessageChars: parsePositiveInt(value.userMessageChars, "userMessageChars", base.userMessageChars),
+    userArtifactThresholdChars: parsePositiveInt(value.userArtifactThresholdChars, "userArtifactThresholdChars", base.userArtifactThresholdChars),
+    userArtifactPreviewChars: parsePositiveInt(value.userArtifactPreviewChars, "userArtifactPreviewChars", base.userArtifactPreviewChars),
+    userArtifactCandidateChars: parsePositiveInt(value.userArtifactCandidateChars, "userArtifactCandidateChars", base.userArtifactCandidateChars),
+    userArtifactReferenceChars: parsePositiveInt(value.userArtifactReferenceChars, "userArtifactReferenceChars", base.userArtifactReferenceChars),
     targetPostCompactTokens: parsePositiveInt(value.targetPostCompactTokens, "targetPostCompactTokens", base.targetPostCompactTokens),
     intentWorkflowChars: parsePositiveInt(value.intentWorkflowChars, "intentWorkflowChars", base.intentWorkflowChars),
     gitStateChars: parseNonNegativeInt(value.gitStateChars, "gitStateChars", base.gitStateChars),

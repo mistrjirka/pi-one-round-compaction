@@ -53,6 +53,7 @@ test("extension launches exactly two LLM lanes concurrently and deterministicall
         list.push(handler);
         handlers.set(name, list);
       },
+      registerTool() {},
       registerCommand() {},
     };
     oneRoundCompaction(fakePi as never);
@@ -79,6 +80,7 @@ test("extension launches exactly two LLM lanes concurrently and deterministicall
     let calls = 0;
     const fakeCtx = {
       cwd,
+      sessionManager: { getSessionId: () => "test-session" },
       isProjectTrusted: () => false,
       ui: { notify() {} },
       modelRegistry: {
@@ -152,6 +154,124 @@ test("extension launches exactly two LLM lanes concurrently and deterministicall
   }
 });
 
+test("oversized human plan becomes an LLM-classified durable reference in the checkpoint", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-artifact-integration-"));
+  const agentDir = path.join(root, "agent");
+  const cwd = path.join(root, "repo");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+    const fakePi = {
+      on(name: string, handler: (event: unknown, ctx: unknown) => unknown) {
+        const list = handlers.get(name) ?? [];
+        list.push(handler);
+        handlers.set(name, list);
+      },
+      registerTool() {},
+      registerCommand() {},
+    };
+    oneRoundCompaction(fakePi as never);
+    const beforeCompact = handlers.get("session_before_compact")?.[0];
+    assert.ok(beforeCompact);
+
+    const model = {
+      id: "muse-spark-1.2-contributor",
+      name: "Muse Spark 1.2 Contributor",
+      api: "openai-responses",
+      provider: "opencode-go",
+      baseUrl: "https://example.invalid",
+      reasoning: true,
+      thinkingLevelMap: { low: "low" },
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 1_048_576,
+      maxTokens: 131_072,
+    };
+    const seenPrompts: string[] = [];
+    const fakeCtx = {
+      cwd,
+      sessionManager: { getSessionId: () => "artifact-session" },
+      isProjectTrusted: () => false,
+      ui: { notify() {} },
+      modelRegistry: {
+        find(provider: string, modelId: string) {
+          return provider === model.provider && modelId === model.id ? model : undefined;
+        },
+        async complete(_model: unknown, request: { messages: Array<{ content: Array<{ text?: string }> }> }) {
+          const prompt = request.messages[0]?.content[0]?.text ?? "";
+          seenPrompts.push(prompt);
+          const text = prompt.includes("Oversized human user-source candidates")
+            ? "## Current Objective\nImplement the current plan\n\n## Accepted Plan / Scope\n- Follow the user plan\n\n## Constraints / Exclusions / User Corrections\n- Preserve scope\n\n## Durable User Sources\n- U0001 — original implementation plan; exact wording can be retrieved with user_artifact"
+            : "## Done\n- inspected\n\n## Current Code / Repository State\n- backend\n\n## Verification State\n- NOT RUN\n\n## Adjustments / Discoveries\n- none\n\n## Remaining / Immediate Next Actions\n1. implement";
+          return {
+            role: "assistant",
+            content: [{ type: "text", text }],
+            api: "openai-responses",
+            provider: model.provider,
+            model: model.id,
+            usage: emptyUsageForTests(),
+            stopReason: "stop",
+            timestamp: Date.now(),
+          };
+        },
+      },
+    };
+
+    const bigPlan = `Original implementation plan\n${"p".repeat(9_000)}`;
+    const branchEntries = [
+      entry("u1", user(bigPlan)),
+      entry("a1", assistant("I will follow it.")),
+      entry("u2", user("continue")),
+      entry("a2", assistant("continuing")),
+    ];
+    const event = {
+      branchEntries,
+      preparation: {
+        firstKeptEntryId: "u2",
+        messagesToSummarize: [user(bigPlan), assistant("I will follow it.")],
+        turnPrefixMessages: [],
+        isSplitTurn: false,
+        tokensBefore: 3_000,
+        previousSummary: undefined,
+        fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
+        settings: { enabled: true, reserveTokens: 0, keepRecentTokens: 80 },
+      },
+      customInstructions: undefined,
+      reason: "threshold",
+      willRetry: false,
+      signal: new AbortController().signal,
+    };
+
+    const result = await beforeCompact(event as never, fakeCtx as never) as {
+      compaction?: {
+        summary: string;
+        details: {
+          version: number;
+          knownUserArtifactIds: string[];
+          durableUserReferences: Array<{ id: string; state: string; semanticNote?: string }>;
+        };
+      };
+    };
+
+    assert.equal(result.compaction?.details.version, 4);
+    assert.deepEqual(result.compaction?.details.knownUserArtifactIds, ["U0001"]);
+    assert.equal(result.compaction?.details.durableUserReferences[0]?.id, "U0001");
+    assert.equal(result.compaction?.details.durableUserReferences[0]?.state, "active");
+    assert.match(result.compaction?.details.durableUserReferences[0]?.semanticNote ?? "", /implementation plan/);
+    assert.match(result.compaction?.summary ?? "", /Recoverable oversized user sources/);
+    assert.match(result.compaction?.summary ?? "", /U0001 \[active\]/);
+    assert.match(result.compaction?.summary ?? "", /user_artifact/);
+    assert.equal(seenPrompts.filter((prompt) => prompt.includes("Oversized human user-source candidates")).length, 1);
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  }
+});
+
 test("active intent workflow is autodetected and switches the two lanes to implementation plus evidence", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-workflow-test-"));
   const agentDir = path.join(root, "agent");
@@ -203,6 +323,7 @@ Implement strict tools and Qdrant indexes.
         list.push(handler);
         handlers.set(name, list);
       },
+      registerTool() {},
       registerCommand() {},
     };
     oneRoundCompaction(fakePi as never);
@@ -229,6 +350,7 @@ Implement strict tools and Qdrant indexes.
     const seenPrompts: string[] = [];
     const fakeCtx = {
       cwd,
+      sessionManager: { getSessionId: () => "test-session" },
       isProjectTrusted: () => false,
       ui: { notify() {} },
       modelRegistry: {
@@ -332,6 +454,7 @@ test("idle input preflight compacts before a prompt would cross the model contex
         list.push(handler);
         handlers.set(name, list);
       },
+      registerTool() {},
       registerCommand() {},
     };
     oneRoundCompaction(fakePi as never);
@@ -342,6 +465,7 @@ test("idle input preflight compacts before a prompt would cross the model contex
     const notifications: string[] = [];
     const fakeCtx = {
       cwd,
+      sessionManager: { getSessionId: () => "test-session" },
       isProjectTrusted: () => false,
       isIdle: () => true,
       getContextUsage: () => ({ tokens: 270_000, contextWindow: 272_000, percent: 99.26 }),
@@ -384,6 +508,7 @@ test("failed required preflight blocks the prompt instead of sending oversized c
         list.push(handler);
         handlers.set(name, list);
       },
+      registerTool() {},
       registerCommand() {},
     };
     oneRoundCompaction(fakePi as never);
@@ -393,6 +518,7 @@ test("failed required preflight blocks the prompt instead of sending oversized c
     const notifications: string[] = [];
     const fakeCtx = {
       cwd,
+      sessionManager: { getSessionId: () => "test-session" },
       isProjectTrusted: () => false,
       isIdle: () => true,
       getContextUsage: () => ({ tokens: 271_000, contextWindow: 272_000, percent: 99.63 }),

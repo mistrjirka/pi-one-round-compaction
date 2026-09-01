@@ -74,7 +74,7 @@ Removing the other compaction extension does **not** remove Pi's native compacti
 Recommended: install the tagged release directly from GitHub:
 
 ```bash
-pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.2
+pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.3
 ```
 
 To follow the latest `main` instead:
@@ -86,7 +86,7 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction
 Pi also accepts the SSH form:
 
 ```bash
-pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.2
+pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.3
 ```
 
 For development from a local checkout:
@@ -169,7 +169,7 @@ If you installed the unpinned Git source, update extensions normally with Pi:
 pi update --extensions
 ```
 
-A pinned install such as `@v0.3.2` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
+A pinned install such as `@v0.3.3` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
 
 ```bash
 pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
@@ -178,7 +178,7 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
 ### Uninstalling
 
 ```bash
-pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.2
+pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.3
 ```
 
 If Pi reports that the source string differs, run `pi list` and remove the exact listed package source.
@@ -224,7 +224,11 @@ Default behavior is equivalent to:
   "toolResultChars": 2000,
   "thinkingChars": 0,
   "recentControlChars": 16000,
-  "userMessageChars": 900,
+  "userMessageChars": 2000,
+  "userArtifactThresholdChars": 8000,
+  "userArtifactPreviewChars": 600,
+  "userArtifactCandidateChars": 12000,
+  "userArtifactReferenceChars": 4000,
   "targetPostCompactTokens": 40000,
   "intentWorkflowChars": 8000,
   "gitStateChars": 4000,
@@ -281,6 +285,40 @@ The target is deliberately **soft**. LLM lane summaries are high-priority and ar
 
 Pi's native threshold/overflow triggers remain unchanged. `preflightAutoCompact` adds one extra trigger only for an idle user submission whose projected `current + incoming` context would exceed the active model window; it does not reserve a fixed number of tokens before compaction.
 
+## Oversized human user sources
+
+Large pasted plans/specifications should not be repeatedly summarized until exact requirements disappear. Human user messages of at least `userArtifactThresholdChars` (8,000 chars by default) are therefore stored verbatim in a session-local sidecar under:
+
+```text
+~/.pi/agent/state/one-round-compaction/sessions/<session-id>/
+  user-artifacts.json
+  user-artifacts/
+    U0001-<hash>.md
+    ...
+```
+
+Only native persisted `role: "user"` messages are eligible. Extension/custom messages such as subagent progress, background completion/failure notifications, bash execution wrappers, and compaction summaries are never treated as human source material. Existing oversized messages are backfilled from the current branch on the next compaction; new large interactive/RPC inputs are also saved before a preflight compaction can discard older context. Exact artifacts are SHA-256 deduplicated and branch-scoped when exposed back to the model.
+
+The intent/implementation LLM lane receives bounded metadata/previews and performs the semantic decision. When candidates are present it appends `## Durable User Sources` and mentions only sources still relevant to the current task, classifying them naturally (for example plan, requirements, specification, or log). The deterministic layer does not guess what a plan is.
+
+References use a two-compaction hysteresis:
+
+- mentioned by the semantic lane → `active`
+- omitted once → `cooling`
+- omitted on the next compaction as well → removed from normal checkpoint context (archived)
+
+Archiving never deletes the exact source. Every checkpoint that has archived sources retains a small recovery hint, and the extension exposes the `user_artifact` tool:
+
+```text
+user_artifact list
+user_artifact search <query>
+user_artifact read U0001
+```
+
+The tool is branch-scoped and `read` supports `startChar`/`maxChars` paging for very large plans. The model is instructed to retrieve the exact artifact whenever wording or omitted requirements matter instead of trusting a lossy summary.
+
+The ordinary human-message ledger remains separate. `recentControlChars` still caps its total rendered size at 16,000 chars by default, while `userMessageChars` now allows up to 2,000 chars per compacted human message. Rendering first preserves a useful share for every genuine human message and gives spare budget to newer messages; oversized artifacts provide the exact fallback for long pasted source material.
+
 ## Prompt overrides
 
 Built-in prompts can be overridden without editing the extension.
@@ -330,7 +368,7 @@ The ledger remains context rather than absolute authority. Newer retained raw us
 
 ### Normal mode: intent/scope lane
 
-Receives all user messages from the compacted prefix and concise assistant text. Tool results and hidden reasoning are omitted. It owns only:
+Receives native human user messages from the compacted prefix and concise assistant text. Tool results, hidden reasoning, and extension/custom messages are omitted from task semantics even though Pi maps some of those generated messages to provider `role=user`. It owns only:
 
 - current objective
 - accepted plan/scope
@@ -341,7 +379,7 @@ It is explicitly forbidden from turning historical work back into current scope.
 
 ### Normal mode: execution-state lane
 
-Receives the compacted prefix with tool calls and truncated tool results. Hidden reasoning is omitted by default. It owns only:
+Receives the compacted prefix with tool calls and truncated tool results. Generated extension/custom/bash messages remain available as execution evidence, but are explicitly labeled as generated evidence and truncated instead of being mislabeled as human user instructions. Hidden reasoning is omitted by default. It owns only:
 
 - completed/current implementation state
 - relevant code/repository state
@@ -366,8 +404,9 @@ Merged without an LLM:
 - current git root/branch/HEAD and bounded dirty paths, ordered by filesystem modification time when available
 - files actually edited/written in the compacted trace, newest touch first and character-bounded
 - a much smaller bounded list of trace-local read files
-- cumulative compacted user-message ledger across repeated compactions; each source message is capped at 900 chars and explicitly marked when trimmed
-- full cumulative file/user metadata in structured compaction `details`, even when the model-facing rendering is reduced
+- cumulative compacted **human** user-message ledger across repeated compactions; extension/subagent/background notifications are excluded, each source message is capped at 2,000 chars by default, and rendered shares favor preserving short messages plus newer detail
+- LLM-selected active/cooling references to exact oversized human source artifacts, with archived sources still recoverable through `user_artifact`
+- full cumulative file/user/reference metadata in structured compaction `details`, even when the model-facing rendering is reduced
 - retention/target metadata, including effective raw budget and whether the soft target was exceeded
 
 ## PiTTy / observability

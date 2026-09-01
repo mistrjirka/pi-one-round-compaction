@@ -1,6 +1,8 @@
+import { contentText, StringEnum } from "@earendil-works/pi-ai";
 import type { CompactionResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
-import { loadConfig, resolveLaneConfig } from "./config.js";
+import { DEFAULT_CONFIG, loadConfig, resolveLaneConfig } from "./config.js";
 import { activateIntentWorkflowForSession, detectIntentWorkflow } from "./intent-workflow.js";
 import { loadPromptSet } from "./prompt-loader.js";
 import {
@@ -23,6 +25,69 @@ import {
 } from "./core.js";
 import { createProgressReporter } from "./progress.js";
 import { getPreflightProjection, projectionExceedsContext } from "./preflight.js";
+import {
+  backfillUserArtifacts,
+  loadUserArtifactManifest,
+  previousUserArtifactState,
+  readUserArtifact,
+  reconcileDurableUserReferences,
+  referencedArtifactIds,
+  renderArtifactCandidates,
+  searchUserArtifacts,
+  storeUserArtifact,
+  userArtifactIdsOnBranch,
+  type DurableUserReference,
+  type UserArtifactRecord,
+} from "./user-artifacts.js";
+
+
+const UserArtifactToolParams = Type.Object({
+  action: StringEnum(["list", "read", "search"] as const),
+  id: Type.Optional(Type.String({ description: "Known durable source id such as U0001 (read)." })),
+  query: Type.Optional(Type.String({ description: "Case-insensitive text query over archived oversized human messages (search)." })),
+  startChar: Type.Optional(Type.Integer({ minimum: 0, description: "Character offset for paged read." })),
+  maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 50000, description: "Maximum exact characters returned by read; default 16000." })),
+});
+
+function formatArtifactCatalog(records: UserArtifactRecord[]): string {
+  if (records.length === 0) return "No oversized human user sources are stored for this session.";
+  return records.map((record) => `- ${record.id}: ${record.chars.toLocaleString()} chars; ${record.preview}`).join("\n");
+}
+
+function uniqueArtifactCandidates(params: {
+  artifacts: UserArtifactRecord[];
+  previous: DurableUserReference[];
+  knownIds: string[];
+  recalledIds: string[];
+}): UserArtifactRecord[] {
+  const byId = new Map(params.artifacts.map((artifact) => [artifact.id, artifact]));
+  const known = new Set(params.knownIds);
+  const ordered: UserArtifactRecord[] = [];
+  const seen = new Set<string>();
+  const push = (id: string) => {
+    if (seen.has(id)) return;
+    const record = byId.get(id);
+    if (!record) return;
+    seen.add(id);
+    ordered.push(record);
+  };
+
+  // Existing active/cooling references get first claim on the prompt budget.
+  for (const reference of [...params.previous].sort((a, b) => {
+    if (a.state !== b.state) return a.state === "active" ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  })) push(reference.id);
+
+  // Then expose newly discovered exact human sources, newest first.
+  for (const artifact of [...params.artifacts]
+    .filter((artifact) => !known.has(artifact.id))
+    .sort((a, b) => b.timestamp - a.timestamp)) push(artifact.id);
+
+  // Explicit references observed in recent execution/tool evidence can revive an
+  // archived source so the semantic lane can decide whether it matters again.
+  for (const id of params.recalledIds) push(id);
+  return ordered;
+}
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -40,25 +105,110 @@ function compactAndWait(ctx: ExtensionContext): Promise<CompactionResult> {
 export default function oneRoundCompaction(pi: ExtensionAPI): void {
   const extensionLoadedAtMs = Date.now();
 
+  pi.registerTool({
+    name: "user_artifact",
+    label: "User Artifact",
+    description: "Recover exact oversized human user messages that compaction keeps outside normal context. Actions: list, search, read.",
+    promptSnippet: "Recover exact oversized human plans/specs saved across compactions",
+    promptGuidelines: [
+      "Use user_artifact when a checkpoint references a U#### source or when exact wording from an older oversized user plan/spec may matter; search archived sources instead of assuming compaction lost them.",
+    ],
+    parameters: UserArtifactToolParams,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const sessionId = ctx.sessionManager.getSessionId();
+      const manifest = await loadUserArtifactManifest(sessionId);
+      const branchEntries = ctx.sessionManager.getBranch();
+      const previousState = previousUserArtifactState(branchEntries);
+      const branchIds = new Set([
+        ...previousState.knownIds,
+        ...userArtifactIdsOnBranch(manifest.artifacts, branchEntries),
+      ]);
+      if (params.action === "list") {
+        const records = manifest.artifacts
+          .filter((artifact) => branchIds.has(artifact.id))
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, 50);
+        return {
+          content: [{ type: "text", text: formatArtifactCatalog(records) }],
+          details: { action: "list", count: records.length, records },
+        };
+      }
+      if (params.action === "search") {
+        if (!params.query?.trim()) {
+          return { content: [{ type: "text", text: "user_artifact search requires query." }], isError: true, details: { action: "search" } };
+        }
+        const records = await searchUserArtifacts(sessionId, params.query, 20, branchIds);
+        return {
+          content: [{ type: "text", text: records.length ? formatArtifactCatalog(records) : `No oversized human user source matched: ${params.query}` }],
+          details: { action: "search", query: params.query, records },
+        };
+      }
+
+      if (!params.id?.trim()) {
+        return { content: [{ type: "text", text: "user_artifact read requires id (for example U0001)." }], isError: true, details: { action: "read" } };
+      }
+      const requestedId = params.id.trim();
+      if (!branchIds.has(requestedId)) {
+        return { content: [{ type: "text", text: `User artifact ${requestedId} is not available on the current session branch.` }], isError: true, details: { action: "read", id: requestedId } };
+      }
+      const found = await readUserArtifact(sessionId, requestedId);
+      if (!found) {
+        return { content: [{ type: "text", text: `User artifact ${params.id.trim()} was not found in this session.` }], isError: true, details: { action: "read", id: params.id.trim() } };
+      }
+      const start = Math.min(params.startChar ?? 0, found.text.length);
+      const maxChars = Math.min(params.maxChars ?? 16_000, 50_000);
+      const end = Math.min(found.text.length, start + maxChars);
+      const slice = found.text.slice(start, end);
+      const trailer = end < found.text.length
+        ? `\n\n[${found.record.id}: showing chars ${start.toLocaleString()}-${end.toLocaleString()} of ${found.text.length.toLocaleString()}; continue with startChar=${end}]`
+        : `\n\n[${found.record.id}: end of exact source; ${found.text.length.toLocaleString()} chars total]`;
+      return {
+        content: [{ type: "text", text: `${slice}${trailer}` }],
+        details: { action: "read", id: found.record.id, startChar: start, endChar: end, totalChars: found.text.length, sha256: found.record.sha256 },
+      };
+    },
+  });
+
   // Pi 0.84.x checks native threshold compaction before it adds a newly submitted
   // user prompt. With reserveTokens=0, a session can therefore be below the model
   // limit at that check and cross the limit only after the new prompt is appended.
   // Close that gap without inventing a reserve: project the incoming prompt itself.
   pi.on("input", async (event, ctx) => {
+    let loaded: Awaited<ReturnType<typeof loadConfig>> | undefined;
+
+    // Preserve genuinely large human/RPC input before any preflight compaction can
+    // run. Ordinary prompts keep the old fast path and do not touch plugin config.
+    // Configured lower thresholds are still honored by exact branch backfill at the
+    // next compaction; the default threshold is the eager-storage trigger.
+    if (event.source !== "extension" && event.text.length >= DEFAULT_CONFIG.userArtifactThresholdChars) {
+      try {
+        loaded = await loadConfig(ctx);
+        if (loaded.config.enabled) {
+          await storeUserArtifact({
+            sessionId: ctx.sessionManager.getSessionId(),
+            text: event.text,
+            timestamp: Date.now(),
+            thresholdChars: loaded.config.userArtifactThresholdChars,
+            previewChars: loaded.config.userArtifactPreviewChars,
+          });
+        }
+      } catch (error) {
+        ctx.ui.notify(`Could not preserve oversized user source: ${formatError(error)}`, "warning");
+      }
+    }
+
     if (!ctx.isIdle()) return;
 
-    // Fast path: ordinary prompts do not touch plugin config files at all.
     const projection = getPreflightProjection(ctx, event.text, event.images);
     if (!projection || !projectionExceedsContext(projection)) return;
 
-    let loaded: Awaited<ReturnType<typeof loadConfig>>;
     try {
-      loaded = await loadConfig(ctx);
+      loaded ??= await loadConfig(ctx);
     } catch (error) {
       ctx.ui.notify(`One-round compaction config error: ${formatError(error)}`, "error");
       return { action: "handled" };
     }
-    if (!loaded.config.enabled || !loaded.config.preflightAutoCompact) return;
+    if (!loaded || !loaded.config.enabled || !loaded.config.preflightAutoCompact) return;
 
     ctx.ui.notify(
       `One-round preflight: projected ${projection.projectedTokens.toLocaleString()} / ${projection.contextWindow.toLocaleString()} tokens; compacting before request`,
@@ -111,6 +261,13 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const { config } = loaded;
     if (!config.enabled) return;
 
+    const previousArtifactState = previousUserArtifactState(event.branchEntries);
+    const hasDurableUserSources = previousArtifactState.knownIds.length > 0 || event.branchEntries.some((entry) =>
+      entry.type === "message"
+      && entry.message.role === "user"
+      && contentText(entry.message.content, "").length >= config.userArtifactThresholdChars
+    );
+
     const intentLaneConfig = resolveLaneConfig(config, "intent");
     const executionLaneConfig = resolveLaneConfig(config, "execution");
     const maxRenderBudgets: DeterministicRenderBudgets = {
@@ -119,6 +276,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       editedFilesChars: config.editedFilesChars,
       readFilesChars: config.readFilesChars,
       userMessagesChars: config.recentControlChars,
+      userArtifactReferencesChars: hasDurableUserSources ? config.userArtifactReferenceChars : 0,
     };
     const deterministicReserveChars = Object.values(maxRenderBudgets).reduce((sum, value) => sum + value, 0);
     const effectiveRecentTokenBudget = computeEffectiveRecentTokenBudget({
@@ -141,17 +299,60 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       boundary.firstKeptEntryId,
       config.userMessageChars,
     );
-    const deterministicWithoutGit: DeterministicState = {
-      ...fileState,
-      userMessages,
-      ...(intentWorkflow.active ? { intentWorkflow } : {}),
-    };
+
+    const sessionId = ctx.sessionManager.getSessionId();
+    let artifacts: UserArtifactRecord[] = [];
+    try {
+      await backfillUserArtifacts({
+        sessionId,
+        branchEntries: event.branchEntries,
+        thresholdChars: config.userArtifactThresholdChars,
+        previewChars: config.userArtifactPreviewChars,
+      });
+      artifacts = (await loadUserArtifactManifest(sessionId)).artifacts;
+    } catch (error) {
+      // Artifact persistence is additive protection. A sidecar I/O failure must not
+      // make the primary compaction path unusable; details still carry known IDs.
+      ctx.ui.notify(`Oversized user-source archive unavailable: ${formatError(error)}`, "warning");
+    }
+    const rawBranchArtifactIds = new Set(userArtifactIdsOnBranch(artifacts, event.branchEntries));
+    const branchKnownIds = new Set([
+      ...previousArtifactState.knownIds,
+      ...rawBranchArtifactIds,
+    ]);
+    const branchArtifacts = artifacts.filter((artifact) => branchKnownIds.has(artifact.id));
+    const knownArtifactIds = [...branchKnownIds];
+    // Previous v4 state came from this exact branch and remains valid even if a
+    // future Pi stops exposing some very old raw entries through getBranch().
+    const previousBranchReferences = previousArtifactState.references;
 
     const executionView = serializeExecutionView(
       allDiscarded,
       config.toolResultChars,
       config.thinkingChars,
     );
+    const artifactCandidates = uniqueArtifactCandidates({
+      artifacts: branchArtifacts,
+      previous: previousBranchReferences,
+      knownIds: previousArtifactState.knownIds,
+      recalledIds: referencedArtifactIds(executionView),
+    });
+    const artifactCandidateText = renderArtifactCandidates({
+      artifacts: artifactCandidates,
+      previous: previousBranchReferences,
+      maxChars: config.userArtifactCandidateChars,
+    });
+    const exposedArtifactIds = new Set(referencedArtifactIds(artifactCandidateText));
+    const exposedArtifactCandidates = artifactCandidates.filter((artifact) => exposedArtifactIds.has(artifact.id));
+
+    const deterministicWithoutGit: DeterministicState = {
+      ...fileState,
+      userMessages,
+      durableUserReferences: previousBranchReferences,
+      userArtifacts: branchArtifacts,
+      knownUserArtifactIds: knownArtifactIds,
+      ...(intentWorkflow.active ? { intentWorkflow } : {}),
+    };
     const intentPrompt = buildLanePrompt({
       lane: "intent",
       lanePrompt: intentWorkflow.active ? promptSet.workflowImplementation : promptSet.intent,
@@ -161,6 +362,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       deterministic: deterministicWithoutGit,
       renderBudgets: maxRenderBudgets,
       isSplitTurn: boundary.isSplitTurn,
+      ...(artifactCandidateText ? { userArtifactCandidates: artifactCandidateText } : {}),
     });
     const executionPrompt = buildLanePrompt({
       lane: "execution",
@@ -236,8 +438,22 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       ]);
 
       progress.merging();
+      const evaluatedReferences = reconcileDurableUserReferences({
+        candidates: exposedArtifactCandidates,
+        previous: previousBranchReferences.filter((reference) => exposedArtifactIds.has(reference.id)),
+        llmText: intent.text,
+      });
+      // A reference that could not fit into this compaction's candidate prompt is
+      // not counted as an omission; preserve its lifecycle until the LLM actually
+      // has a chance to evaluate it.
+      const unevaluatedPrevious = previousBranchReferences.filter((reference) => !exposedArtifactIds.has(reference.id));
+      const referenceMap = new Map<string, DurableUserReference>();
+      for (const reference of [...unevaluatedPrevious, ...evaluatedReferences]) referenceMap.set(reference.id, reference);
+      const durableUserReferences = [...referenceMap.values()];
+
       const deterministic: DeterministicState = {
         ...deterministicWithoutGit,
+        durableUserReferences,
         ...(git ? { git } : {}),
       };
       const wallTimeMs = Math.round(performance.now() - started);
@@ -342,7 +558,11 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `toolResultChars: ${config.toolResultChars}`,
           `thinkingChars: ${config.thinkingChars}`,
           `recentControlChars: ${config.recentControlChars} (total rendered cumulative user-ledger budget)`,
-          `userMessageChars: ${config.userMessageChars} (per compacted user message)`,
+          `userMessageChars: ${config.userMessageChars} (per compacted HUMAN user message; synthetic extension/subagent messages excluded)`,
+          `userArtifactThresholdChars: ${config.userArtifactThresholdChars} (exact oversized human source archive)`,
+          `userArtifactPreviewChars: ${config.userArtifactPreviewChars}`,
+          `userArtifactCandidateChars: ${config.userArtifactCandidateChars} (intent-lane semantic classification budget)`,
+          `userArtifactReferenceChars: ${config.userArtifactReferenceChars} (checkpoint active/cooling reference budget)`,
           `targetPostCompactTokens: ${config.targetPostCompactTokens} (soft target; LLM summaries are never clipped)`,
           `intentWorkflowChars: ${config.intentWorkflowChars}`,
           `gitStateChars: ${config.gitStateChars}`,
