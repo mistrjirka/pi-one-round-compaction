@@ -1,6 +1,6 @@
 {
   "name": "pi-one-round-compaction",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Research-informed, one-round parallel context compaction for Pi Coding Agent",
   "type": "module",
   "license": "MIT",

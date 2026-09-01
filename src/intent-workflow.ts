@@ -352,7 +352,10 @@ export function renderIntentWorkflow(
   const metadata = [
     `Active workstream: \`${snapshot.workstream}\``,
     `Intent: \`${snapshot.intentPath}\``,
-    ...(snapshot.planPath ? [`Plan: \`${snapshot.planPath}\``] : []),
+    ...(snapshot.planPath ? [
+      `Plan: \`${snapshot.planPath}\``,
+      "Plan precedence: this is the maintained evolving workflow plan. Read the exact plan file before implementation when its details govern the work; newer explicit user instructions override stale workflow state.",
+    ] : []),
   ].join("\n");
 
   const planReserve = includePlanBody && snapshot.plan

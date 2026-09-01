@@ -7,6 +7,7 @@ import test from "node:test";
 
 import oneRoundCompaction from "../src/index.js";
 import { emptyUsageForTests } from "../src/core.js";
+import { loadUserArtifactManifest, storeUserArtifact } from "../src/user-artifacts.js";
 
 function user(content: string) {
   return { role: "user" as const, content, timestamp: Date.now() };
@@ -194,7 +195,7 @@ test("oversized human plan becomes an LLM-classified durable reference in the ch
     const seenPrompts: string[] = [];
     const fakeCtx = {
       cwd,
-      sessionManager: { getSessionId: () => "artifact-session" },
+      sessionManager: { getSessionId: () => "artifact-session", getSessionFile: () => undefined, getHeader: () => null },
       isProjectTrusted: () => false,
       ui: { notify() {} },
       modelRegistry: {
@@ -205,7 +206,7 @@ test("oversized human plan becomes an LLM-classified durable reference in the ch
           const prompt = request.messages[0]?.content[0]?.text ?? "";
           seenPrompts.push(prompt);
           const text = prompt.includes("Oversized human user-source candidates")
-            ? "## Current Objective\nImplement the current plan\n\n## Accepted Plan / Scope\n- Follow the user plan\n\n## Constraints / Exclusions / User Corrections\n- Preserve scope\n\n## Durable User Sources\n- U0001 — original implementation plan; exact wording can be retrieved with user_artifact"
+            ? "## Current Objective\nImplement the current plan\n\n## Accepted Plan / Scope\n- Follow the user plan\n\n## Constraints / Exclusions / User Corrections\n- Preserve scope\n\n## Durable User Sources\n- U0001 | sourceSessionId=artifact-session | kind=plan | authority=governing | note=original implementation plan"
             : "## Done\n- inspected\n\n## Current Code / Repository State\n- backend\n\n## Verification State\n- NOT RUN\n\n## Adjustments / Discoveries\n- none\n\n## Remaining / Immediate Next Actions\n1. implement";
           return {
             role: "assistant",
@@ -252,20 +253,111 @@ test("oversized human plan becomes an LLM-classified durable reference in the ch
         details: {
           version: number;
           knownUserArtifactIds: string[];
-          durableUserReferences: Array<{ id: string; state: string; semanticNote?: string }>;
+          knownUserArtifacts: Array<{ id: string; sourceSessionId?: string }>;
+          durableUserReferences: Array<{ id: string; sourceSessionId?: string; state: string; kind?: string; authority?: string; semanticNote?: string }>;
         };
       };
     };
 
-    assert.equal(result.compaction?.details.version, 4);
+    assert.equal(result.compaction?.details.version, 5);
     assert.deepEqual(result.compaction?.details.knownUserArtifactIds, ["U0001"]);
     assert.equal(result.compaction?.details.durableUserReferences[0]?.id, "U0001");
     assert.equal(result.compaction?.details.durableUserReferences[0]?.state, "active");
+    assert.equal(result.compaction?.details.durableUserReferences[0]?.kind, "plan");
+    assert.equal(result.compaction?.details.durableUserReferences[0]?.authority, "governing");
+    assert.equal(result.compaction?.details.durableUserReferences[0]?.sourceSessionId, "artifact-session");
+    assert.deepEqual(result.compaction?.details.knownUserArtifacts, [{ id: "U0001", sourceSessionId: "artifact-session" }]);
     assert.match(result.compaction?.details.durableUserReferences[0]?.semanticNote ?? "", /implementation plan/);
-    assert.match(result.compaction?.summary ?? "", /Recoverable oversized user sources/);
-    assert.match(result.compaction?.summary ?? "", /U0001 \[active\]/);
+    assert.match(result.compaction?.summary ?? "", /Governing exact user sources/);
+    assert.match(result.compaction?.summary ?? "", /READ BEFORE GOVERNED WORK/);
+    assert.match(result.compaction?.summary ?? "", /U0001 \[active, plan, governing\]/);
     assert.match(result.compaction?.summary ?? "", /user_artifact/);
     assert.equal(seenPrompts.filter((prompt) => prompt.includes("Oversized human user-source candidates")).length, 1);
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  }
+});
+
+test("forked child user_artifact reads exact parent governing source", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-fork-tool-"));
+  const agentDir = path.join(root, "agent");
+  const cwd = path.join(root, "repo");
+  const sessionsDir = path.join(agentDir, "sessions");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+  await mkdir(sessionsDir, { recursive: true });
+
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const parentSessionId = "parent-session";
+    const childSessionId = "child-session";
+    const parentFile = path.join(sessionsDir, "parent.jsonl");
+    const childFile = path.join(sessionsDir, "child.jsonl");
+    await writeFile(parentFile, `${JSON.stringify({ type: "session", version: 3, id: parentSessionId, timestamp: new Date().toISOString(), cwd })}\n`, "utf8");
+    await writeFile(childFile, `${JSON.stringify({ type: "session", version: 3, id: childSessionId, timestamp: new Date().toISOString(), cwd, parentSession: parentFile })}\n`, "utf8");
+    const plan = `EXACT PARENT PLAN\n${"q".repeat(9_000)}`;
+    await storeUserArtifact({ sessionId: parentSessionId, text: plan, timestamp: 1, thresholdChars: 8_000, previewChars: 120 });
+
+    let userArtifactTool: { execute: (...args: any[]) => Promise<any> } | undefined;
+    const fakePi = {
+      on() {},
+      registerCommand() {},
+      registerTool(tool: { name: string; execute: (...args: any[]) => Promise<any> }) {
+        if (tool.name === "user_artifact") userArtifactTool = tool;
+      },
+    };
+    oneRoundCompaction(fakePi as never);
+    assert.ok(userArtifactTool);
+
+    const branchEntries = [{
+      type: "compaction" as const,
+      id: "c1",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      summary: "checkpoint",
+      firstKeptEntryId: "u1",
+      tokensBefore: 100_000,
+      details: {
+        plugin: "pi-one-round-compaction",
+        version: 5,
+        knownUserArtifactIds: ["U0001"],
+        knownUserArtifacts: [{ id: "U0001", sourceSessionId: parentSessionId }],
+        durableUserReferences: [{
+          id: "U0001",
+          sourceSessionId: parentSessionId,
+          state: "active",
+          misses: 0,
+          kind: "plan",
+          authority: "governing",
+          semanticNote: "current governing plan",
+        }],
+      },
+    }];
+    const fakeCtx = {
+      cwd,
+      sessionManager: {
+        getSessionId: () => childSessionId,
+        getSessionFile: () => childFile,
+        getHeader: () => ({ type: "session", version: 3, id: childSessionId, timestamp: new Date().toISOString(), cwd, parentSession: parentFile }),
+        getBranch: () => branchEntries,
+      },
+      isProjectTrusted: () => false,
+      ui: { notify() {} },
+    };
+    const result = await userArtifactTool!.execute(
+      "call-1",
+      { action: "read", id: "U0001", sourceSessionId: parentSessionId, maxChars: 20_000 },
+      undefined,
+      undefined,
+      fakeCtx,
+    );
+    assert.equal(result.isError, undefined);
+    const text = result.content?.[0]?.text ?? "";
+    assert.match(text, /^EXACT PARENT PLAN/);
+    assert.match(text, /sourceSessionId=parent-session: end of exact source/);
+    assert.equal((await loadUserArtifactManifest(childSessionId)).artifacts.length, 0);
   } finally {
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;

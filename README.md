@@ -74,7 +74,7 @@ Removing the other compaction extension does **not** remove Pi's native compacti
 Recommended: install the tagged release directly from GitHub:
 
 ```bash
-pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.3
+pi install git:github.com/mistrjirka/pi-one-round-compaction@v0.3.4
 ```
 
 To follow the latest `main` instead:
@@ -86,7 +86,7 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction
 Pi also accepts the SSH form:
 
 ```bash
-pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.3
+pi install git:git@github.com:mistrjirka/pi-one-round-compaction.git@v0.3.4
 ```
 
 For development from a local checkout:
@@ -169,7 +169,7 @@ If you installed the unpinned Git source, update extensions normally with Pi:
 pi update --extensions
 ```
 
-A pinned install such as `@v0.3.3` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
+A pinned install such as `@v0.3.4` is intentionally not moved by updates. Install a newer tag explicitly when one is released:
 
 ```bash
 pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
@@ -178,7 +178,7 @@ pi install git:github.com/mistrjirka/pi-one-round-compaction@NEW_TAG
 ### Uninstalling
 
 ```bash
-pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.3
+pi remove git:github.com/mistrjirka/pi-one-round-compaction@v0.3.4
 ```
 
 If Pi reports that the source string differs, run `pi list` and remove the exact listed package source.
@@ -287,7 +287,7 @@ Pi's native threshold/overflow triggers remain unchanged. `preflightAutoCompact`
 
 ## Oversized human user sources
 
-Large pasted plans/specifications should not be repeatedly summarized until exact requirements disappear. Human user messages of at least `userArtifactThresholdChars` (8,000 chars by default) are therefore stored verbatim in a session-local sidecar under:
+Large pasted plans/specifications should not be repeatedly summarized until exact requirements disappear. Human user messages of at least `userArtifactThresholdChars` (8,000 chars by default) are therefore stored verbatim in a session-owned sidecar under:
 
 ```text
 ~/.pi/agent/state/one-round-compaction/sessions/<session-id>/
@@ -297,9 +297,11 @@ Large pasted plans/specifications should not be repeatedly summarized until exac
     ...
 ```
 
-Only native persisted `role: "user"` messages are eligible. Extension/custom messages such as subagent progress, background completion/failure notifications, bash execution wrappers, and compaction summaries are never treated as human source material. Existing oversized messages are backfilled from the current branch on the next compaction; new large interactive/RPC inputs are also saved before a preflight compaction can discard older context. Exact artifacts are SHA-256 deduplicated and branch-scoped when exposed back to the model.
+Only native persisted `role: "user"` messages are eligible. Extension/custom messages such as subagent progress, background completion/failure notifications, bash execution wrappers, and compaction summaries are never treated as human source material. Existing oversized messages are backfilled from the current branch on the next compaction; new large interactive/RPC inputs are also saved before a preflight compaction can discard older context. Exact artifacts are SHA-256 deduplicated and branch-scoped when exposed back to the model. In a fork, inherited exact text is not duplicated into the child manifest, and new child-local U#### ids are allocated above inherited ordinals to avoid provenance collisions.
 
-The intent/implementation LLM lane receives bounded metadata/previews and performs the semantic decision. When candidates are present it appends `## Durable User Sources` and mentions only sources still relevant to the current task, classifying them naturally (for example plan, requirements, specification, or log). The deterministic layer does not guess what a plan is.
+Forked Pi sessions inherit exact user artifacts read-only through the persisted `parentSession` lineage. The child does not copy the parent's exact files into its own manifest. Provenance is carried as `sourceSessionId`, and new child-local U#### IDs are allocated above inherited IDs so a new child artifact cannot collide with an inherited `U0001`. The tool exposes only artifacts that are actually present on the active branch through raw human messages or prior compaction metadata; it does not expose an ancestor's entire catalog.
+
+The intent/implementation LLM lane receives bounded metadata/previews and performs the semantic decision. When candidates are present it appends `## Durable User Sources` and labels each relevant source with a semantic `kind` (`plan`, `spec`, `requirements`, `correction`, `log`, `evidence`, or `other`) and `authority` (`governing` or `supporting`). The deterministic layer never guesses these labels. `governing` is reserved for exact current user instructions that control planning, delegation, editing, or implementation; logs and ordinary evidence remain `supporting` and are retrieved only on demand.
 
 References use a two-compaction hysteresis:
 
@@ -307,15 +309,16 @@ References use a two-compaction hysteresis:
 - omitted once → `cooling`
 - omitted on the next compaction as well → removed from normal checkpoint context (archived)
 
-Archiving never deletes the exact source. Every checkpoint that has archived sources retains a small recovery hint, and the extension exposes the `user_artifact` tool:
+Archiving never deletes the exact source. Active `governing` sources render a prominent read-before-governed-work section: the checkpoint explicitly says its summary is not a substitute for the exact source and instructs the agent to page through the complete artifact before planning, delegating, editing, or implementing work it governs. Supporting/cooling sources remain on-demand. Every checkpoint that has archived sources retains a small recovery hint, and the extension exposes the `user_artifact` tool:
 
 ```text
 user_artifact list
 user_artifact search <query>
 user_artifact read U0001
+user_artifact read U0001 sourceSessionId=<shown-session-id>
 ```
 
-The tool is branch-scoped and `read` supports `startChar`/`maxChars` paging for very large plans. The model is instructed to retrieve the exact artifact whenever wording or omitted requirements matter instead of trusting a lossy summary.
+The tool is branch-scoped and `read` supports `startChar`/`maxChars` paging for very large plans. When the same U#### could exist in more than one visible session, `sourceSessionId` disambiguates it. Active `governing` sources render under `### Governing exact user sources — READ BEFORE GOVERNED WORK`; the model is explicitly instructed to read the complete exact source before planning, delegating, editing, or implementing work controlled by it. Supporting/cooling sources remain on-demand. This is a strong retrieval contract, not a universal tool-call blocker.
 
 The ordinary human-message ledger remains separate. `recentControlChars` still caps its total rendered size at 16,000 chars by default, while `userMessageChars` now allows up to 2,000 chars per compacted human message. Rendering first preserves a useful share for every genuine human message and gives spare budget to newer messages; oversized artifacts provide the exact fallback for long pasted source material.
 
@@ -360,7 +363,7 @@ ${PI_WORK_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pi-work}/projects/
 
 Detection verifies the canonical project root, the root hash/binding, that `current` resolves inside that project's `intents/` directory, and that `intent.md` contains a non-empty `# Current intent`. Because the workflow's `current` symlink can persist after an old task, a valid pointer alone is not enough: the current Pi session must also have touched/activated that workstream, or a prior compaction in the same session must already have confirmed it. Missing, stale, unconfirmed, invalid, or unrelated ledgers simply select normal compaction mode.
 
-In active mode the plugin re-reads `intent.md` and `plan.md` from disk on every compaction. It extracts the current intent contract sections (`Current intent`, navigation context, direct user quotes, interpretation corrections, accepted behavior, hard constraints, boundaries, accepted decisions, acceptance checks, and open questions) while deliberately omitting `Evolution history`. The persisted checkpoint keeps a bounded prioritized intent contract plus the exact `intent.md`/`plan.md` paths; it does **not** paste the full plan. The LLM lanes receive only a small bounded plan excerpt for orientation. Known untouched template-placeholder lines are also removed. The plugin is read-only: it never creates or modifies intent-workflow files.
+In active mode the plugin re-reads `intent.md` and `plan.md` from disk on every compaction. It extracts the current intent contract sections (`Current intent`, navigation context, direct user quotes, interpretation corrections, accepted behavior, hard constraints, boundaries, accepted decisions, acceptance checks, and open questions) while deliberately omitting `Evolution history`. The persisted checkpoint keeps a bounded prioritized intent contract plus the exact `intent.md`/`plan.md` paths; it does **not** paste the full plan. The LLM lanes receive only a small bounded plan excerpt for orientation. When `plan.md` exists, the checkpoint explicitly identifies it as the maintained evolving workflow plan and tells the agent to read the exact file before implementation when plan detail governs the work. Newer explicit user instructions still override stale workflow state. Known untouched template-placeholder lines are also removed. The plugin is read-only: it never creates or modifies intent-workflow files.
 
 The ledger remains context rather than absolute authority. Newer retained raw user messages override stale ledger content, matching the intent-workflow's own precedence rule.
 
@@ -405,8 +408,8 @@ Merged without an LLM:
 - files actually edited/written in the compacted trace, newest touch first and character-bounded
 - a much smaller bounded list of trace-local read files
 - cumulative compacted **human** user-message ledger across repeated compactions; extension/subagent/background notifications are excluded, each source message is capped at 2,000 chars by default, and rendered shares favor preserving short messages plus newer detail
-- LLM-selected active/cooling references to exact oversized human source artifacts, with archived sources still recoverable through `user_artifact`
-- full cumulative file/user/reference metadata in structured compaction `details`, even when the model-facing rendering is reduced
+- LLM-selected active/cooling references to exact oversized human source artifacts, including `kind`, `authority`, and `sourceSessionId`; active governing sources are rendered as read-before-work instructions, with archived sources still recoverable through `user_artifact`
+- full cumulative file/user/reference metadata in structured compaction `details` version 5, including provenance-qualified `knownUserArtifacts`, even when the model-facing rendering is reduced
 - retention/target metadata, including effective raw budget and whether the soft target was exceeded
 
 ## PiTTy / observability
@@ -495,4 +498,4 @@ npm run typecheck
 npm test
 ```
 
-The tests cover configuration validation, lane views, deterministic merge, cumulative file state, whole-turn token-budget retention, oversized newest turns, the single-turn fallback, intent-workflow auto-detection/stale-ledger rejection, and both normal-mode and active-workflow two-call concurrency.
+The tests cover configuration validation, lane views, deterministic merge, cumulative file state, whole-turn token-budget retention, oversized newest turns, the single-turn fallback, intent-workflow auto-detection/stale-ledger rejection, both normal-mode and active-workflow two-call concurrency, governing/supporting artifact classification, v4→v5 artifact-state migration, forked-child exact parent-artifact reads, and collision-safe child-local artifact IDs.

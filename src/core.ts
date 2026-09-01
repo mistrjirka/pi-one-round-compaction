@@ -24,7 +24,7 @@ import {
 import type { OneRoundCompactionConfig, ThinkingLevel } from "./config.js";
 import { renderIntentWorkflow, type ActiveIntentWorkflow } from "./intent-workflow.js";
 import { SPLIT_TURN_NOTE } from "./prompts.js";
-import { renderDurableUserReferences, type DurableUserReference, type UserArtifactRecord } from "./user-artifacts.js";
+import { renderDurableUserReferences, type DurableUserReference, type UserArtifactLocator, type UserArtifactRecord } from "./user-artifacts.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -83,14 +83,16 @@ export interface DeterministicState {
   durableUserReferences?: DurableUserReference[];
   /** Runtime manifest metadata; only IDs/references are persisted in compaction details. */
   userArtifacts?: UserArtifactRecord[];
-  /** Preserve catalog identity even if sidecar loading is temporarily unavailable. */
+  /** Provenance-qualified catalog identity retained across forked child sessions. */
+  knownUserArtifacts?: UserArtifactLocator[];
+  /** Legacy/display IDs retained for backward compatibility and diagnostics. */
   knownUserArtifactIds?: string[];
   intentWorkflow?: ActiveIntentWorkflow;
 }
 
 export interface OneRoundDetails {
   plugin: "pi-one-round-compaction";
-  version: 4;
+  version: 5;
   lanes: Array<{
     lane: LaneName;
     model: string;
@@ -114,6 +116,7 @@ export interface OneRoundDetails {
   traceEditedFiles: string[];
   userMessages: UserMessageLedgerEntry[];
   knownUserArtifactIds: string[];
+  knownUserArtifacts: UserArtifactLocator[];
   durableUserReferences: DurableUserReference[];
   renderBudgets: DeterministicRenderBudgets;
   git?: GitState;
@@ -363,7 +366,7 @@ export function collectUserMessageLedger(
   for (let i = 0; i < end; i++) {
     const entry = branchEntries[i]!;
     if (entry.type !== "compaction" || !isObject(entry.details)) continue;
-    if (entry.details.plugin !== "pi-one-round-compaction" || entry.details.version !== 4) continue;
+    if (entry.details.plugin !== "pi-one-round-compaction" || (entry.details.version !== 4 && entry.details.version !== 5)) continue;
     const prior = entry.details.userMessages;
     if (!Array.isArray(prior)) continue;
     for (const value of prior) {
@@ -1316,7 +1319,7 @@ export function makeOneRoundDetails(params: {
 }): OneRoundDetails {
   return {
     plugin: "pi-one-round-compaction",
-    version: 4,
+    version: 5,
     lanes: params.laneResults.map((result) => ({
       lane: result.lane,
       model: result.model,
@@ -1341,6 +1344,7 @@ export function makeOneRoundDetails(params: {
     traceEditedFiles: params.deterministic.traceEditedFiles,
     userMessages: params.deterministic.userMessages,
     knownUserArtifactIds: params.deterministic.knownUserArtifactIds ?? (params.deterministic.userArtifacts ?? []).map((artifact) => artifact.id),
+    knownUserArtifacts: params.deterministic.knownUserArtifacts ?? (params.deterministic.userArtifacts ?? []).flatMap((artifact) => artifact.sourceSessionId ? [{ id: artifact.id, sourceSessionId: artifact.sourceSessionId }] : [{ id: artifact.id }]),
     durableUserReferences: params.deterministic.durableUserReferences ?? [],
     ...(params.deterministic.git ? { git: params.deterministic.git } : {}),
     intentWorkflow: params.deterministic.intentWorkflow

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { contentText, StringEnum } from "@earendil-works/pi-ai";
 import type { CompactionResult, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -27,16 +28,22 @@ import { createProgressReporter } from "./progress.js";
 import { getPreflightProjection, projectionExceedsContext } from "./preflight.js";
 import {
   backfillUserArtifacts,
-  loadUserArtifactManifest,
+  loadUserArtifactCatalog,
+  maxUserArtifactOrdinal,
   previousUserArtifactState,
-  readUserArtifact,
+  readCatalogUserArtifact,
   reconcileDurableUserReferences,
   referencedArtifactIds,
   renderArtifactCandidates,
-  searchUserArtifacts,
+  resolveLegacyArtifactProvenance,
+  resolveUserArtifactSessionSources,
+  searchUserArtifactCatalog,
   storeUserArtifact,
-  userArtifactIdsOnBranch,
+  userArtifactHashes,
+  userArtifactKey,
+  userArtifactRecordsOnBranch,
   type DurableUserReference,
+  type UserArtifactLocator,
   type UserArtifactRecord,
 } from "./user-artifacts.js";
 
@@ -44,49 +51,148 @@ import {
 const UserArtifactToolParams = Type.Object({
   action: StringEnum(["list", "read", "search"] as const),
   id: Type.Optional(Type.String({ description: "Known durable source id such as U0001 (read)." })),
+  sourceSessionId: Type.Optional(Type.String({ description: "Provenance session id shown beside a durable source; use when supplied or when the same U#### exists in multiple visible sessions." })),
   query: Type.Optional(Type.String({ description: "Case-insensitive text query over archived oversized human messages (search)." })),
   startChar: Type.Optional(Type.Integer({ minimum: 0, description: "Character offset for paged read." })),
   maxChars: Type.Optional(Type.Integer({ minimum: 1, maximum: 50000, description: "Maximum exact characters returned by read; default 16000." })),
 });
 
 function formatArtifactCatalog(records: UserArtifactRecord[]): string {
-  if (records.length === 0) return "No oversized human user sources are stored for this session.";
-  return records.map((record) => `- ${record.id}: ${record.chars.toLocaleString()} chars; ${record.preview}`).join("\n");
+  if (records.length === 0) return "No oversized human user sources are available on this branch or inherited fork lineage.";
+  return records.map((record) => `- ${record.id} sourceSessionId=${record.sourceSessionId ?? "unknown"}: ${record.chars.toLocaleString()} chars; ${record.preview}`).join("\n");
+}
+
+function matchingArtifact(artifacts: UserArtifactRecord[], locator: UserArtifactLocator): UserArtifactRecord | undefined {
+  return artifacts.find((artifact) => artifact.id === locator.id
+    && (!locator.sourceSessionId || artifact.sourceSessionId === locator.sourceSessionId));
 }
 
 function uniqueArtifactCandidates(params: {
   artifacts: UserArtifactRecord[];
   previous: DurableUserReference[];
-  knownIds: string[];
+  knownArtifacts: UserArtifactLocator[];
   recalledIds: string[];
 }): UserArtifactRecord[] {
-  const byId = new Map(params.artifacts.map((artifact) => [artifact.id, artifact]));
-  const known = new Set(params.knownIds);
+  const known = new Set(params.knownArtifacts.map(userArtifactKey));
   const ordered: UserArtifactRecord[] = [];
   const seen = new Set<string>();
-  const push = (id: string) => {
-    if (seen.has(id)) return;
-    const record = byId.get(id);
+  const push = (record: UserArtifactRecord | undefined): void => {
     if (!record) return;
-    seen.add(id);
+    const key = userArtifactKey(record);
+    if (seen.has(key)) return;
+    seen.add(key);
     ordered.push(record);
   };
 
-  // Existing active/cooling references get first claim on the prompt budget.
   for (const reference of [...params.previous].sort((a, b) => {
     if (a.state !== b.state) return a.state === "active" ? -1 : 1;
     return a.id.localeCompare(b.id);
-  })) push(reference.id);
+  })) push(matchingArtifact(params.artifacts, reference));
 
-  // Then expose newly discovered exact human sources, newest first.
   for (const artifact of [...params.artifacts]
-    .filter((artifact) => !known.has(artifact.id))
-    .sort((a, b) => b.timestamp - a.timestamp)) push(artifact.id);
+    .filter((artifact) => !known.has(userArtifactKey(artifact)))
+    .sort((a, b) => b.timestamp - a.timestamp)) push(artifact);
 
-  // Explicit references observed in recent execution/tool evidence can revive an
-  // archived source so the semantic lane can decide whether it matters again.
-  for (const id of params.recalledIds) push(id);
+  for (const id of params.recalledIds) {
+    for (const artifact of params.artifacts) if (artifact.id === id) push(artifact);
+  }
   return ordered;
+}
+
+async function artifactSourcesForContext(ctx: ExtensionContext) {
+  // ExtensionContext normally exposes these methods, but keep the archive usable
+  // in lightweight/embedded Pi runtimes that only provide a session id.
+  const manager = ctx.sessionManager as unknown as {
+    getSessionId(): string;
+    getSessionFile?: () => string | undefined;
+    getHeader?: () => { parentSession?: string } | null;
+  };
+  const currentSessionFile = manager.getSessionFile?.();
+  const parentSession = manager.getHeader?.()?.parentSession;
+  return resolveUserArtifactSessionSources({
+    currentSessionId: manager.getSessionId(),
+    ...(currentSessionFile ? { currentSessionFile } : {}),
+    ...(parentSession ? { parentSession } : {}),
+  });
+}
+
+async function loadBranchArtifactContext(params: {
+  ctx: ExtensionContext;
+  branchEntries: ReturnType<ExtensionContext["sessionManager"]["getBranch"]>;
+  thresholdChars: number;
+  previewChars: number;
+}): Promise<{
+  branchArtifacts: UserArtifactRecord[];
+  previousReferences: DurableUserReference[];
+  knownArtifacts: UserArtifactLocator[];
+  previousKnownArtifacts: UserArtifactLocator[];
+}> {
+  const sources = await artifactSourcesForContext(params.ctx);
+  const inherited = await loadUserArtifactCatalog(sources.slice(1));
+  await backfillUserArtifacts({
+    sessionId: params.ctx.sessionManager.getSessionId(),
+    branchEntries: params.branchEntries,
+    thresholdChars: params.thresholdChars,
+    previewChars: params.previewChars,
+    skipSha256: userArtifactHashes(inherited),
+    minNextId: maxUserArtifactOrdinal(inherited) + 1,
+  });
+  const artifacts = await loadUserArtifactCatalog(sources);
+  const previous = previousUserArtifactState(params.branchEntries);
+  const normalized = resolveLegacyArtifactProvenance({
+    artifacts,
+    references: previous.references,
+    knownArtifacts: previous.knownArtifacts,
+    knownIds: previous.knownIds,
+    ...(previous.checkpointTimestamp !== undefined ? { checkpointTimestamp: previous.checkpointTimestamp } : {}),
+  });
+  const rawBranchArtifacts = userArtifactRecordsOnBranch(artifacts, params.branchEntries);
+  const known = new Map<string, UserArtifactLocator>();
+  for (const locator of normalized.knownArtifacts) {
+    const record = matchingArtifact(artifacts, locator);
+    if (record?.sourceSessionId) known.set(userArtifactKey(record), { id: record.id, sourceSessionId: record.sourceSessionId });
+  }
+  for (const record of rawBranchArtifacts) {
+    if (record.sourceSessionId) known.set(userArtifactKey(record), { id: record.id, sourceSessionId: record.sourceSessionId });
+  }
+  const knownArtifacts = [...known.values()];
+  const previousKnownArtifacts = normalized.knownArtifacts.flatMap((locator) => {
+    const record = matchingArtifact(artifacts, locator);
+    return record?.sourceSessionId ? [{ id: record.id, sourceSessionId: record.sourceSessionId }] : [];
+  });
+  const knownKeys = new Set(knownArtifacts.map(userArtifactKey));
+  return {
+    branchArtifacts: artifacts.filter((artifact) => knownKeys.has(userArtifactKey(artifact))),
+    previousReferences: normalized.references.filter((reference) => knownKeys.has(userArtifactKey(reference))),
+    knownArtifacts,
+    previousKnownArtifacts,
+  };
+}
+
+async function preserveIncomingUserArtifact(params: {
+  ctx: ExtensionContext;
+  text: string;
+  timestamp: number;
+  thresholdChars: number;
+  previewChars: number;
+}): Promise<void> {
+  const sources = await artifactSourcesForContext(params.ctx);
+  const inherited = await loadUserArtifactCatalog(sources.slice(1));
+  const sha256 = createHash("sha256").update(params.text).digest("hex");
+  if (userArtifactHashes(inherited).has(sha256)) return;
+  await storeUserArtifact({
+    sessionId: params.ctx.sessionManager.getSessionId(),
+    text: params.text,
+    timestamp: params.timestamp,
+    thresholdChars: params.thresholdChars,
+    previewChars: params.previewChars,
+    minNextId: maxUserArtifactOrdinal(inherited) + 1,
+  });
+}
+
+function artifactWasRendered(text: string, artifact: UserArtifactRecord): boolean {
+  return text.includes(artifact.id)
+    && Boolean(artifact.sourceSessionId && text.includes(`sourceSessionId=${artifact.sourceSessionId}`));
 }
 
 function formatError(error: unknown): string {
@@ -108,36 +214,45 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "user_artifact",
     label: "User Artifact",
-    description: "Recover exact oversized human user messages that compaction keeps outside normal context. Actions: list, search, read.",
-    promptSnippet: "Recover exact oversized human plans/specs saved across compactions",
+    description: "Recover exact oversized human user messages preserved outside normal context, including sources inherited from a forked parent session. Actions: list, search, read.",
+    promptSnippet: "Recover exact oversized human plans/specs saved across compactions and forked parent sessions",
     promptGuidelines: [
-      "Use user_artifact when a checkpoint references a U#### source or when exact wording from an older oversized user plan/spec may matter; search archived sources instead of assuming compaction lost them.",
+      "When a checkpoint marks a U#### source as governing, read that exact source before planning, delegating, editing, or implementing work governed by it; the checkpoint summary is not a substitute for the exact source.",
+      "Use both id and sourceSessionId when they are shown. Supporting/log sources need retrieval only when exact evidence or wording matters.",
+      "Search archived sources instead of assuming compaction lost an older oversized user message.",
     ],
     parameters: UserArtifactToolParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const sessionId = ctx.sessionManager.getSessionId();
-      const manifest = await loadUserArtifactManifest(sessionId);
-      const branchEntries = ctx.sessionManager.getBranch();
-      const previousState = previousUserArtifactState(branchEntries);
-      const branchIds = new Set([
-        ...previousState.knownIds,
-        ...userArtifactIdsOnBranch(manifest.artifacts, branchEntries),
-      ]);
+      let config;
+      try {
+        ({ config } = await loadConfig(ctx));
+      } catch (error) {
+        return { content: [{ type: "text", text: `user_artifact configuration error: ${formatError(error)}` }], isError: true, details: { action: params.action } };
+      }
+      let artifactContext;
+      try {
+        artifactContext = await loadBranchArtifactContext({
+          ctx,
+          branchEntries: ctx.sessionManager.getBranch(),
+          thresholdChars: config.userArtifactThresholdChars,
+          previewChars: config.userArtifactPreviewChars,
+        });
+      } catch (error) {
+        return { content: [{ type: "text", text: `user_artifact archive unavailable: ${formatError(error)}` }], isError: true, details: { action: params.action } };
+      }
+      const visible = artifactContext.branchArtifacts;
       if (params.action === "list") {
-        const records = manifest.artifacts
-          .filter((artifact) => branchIds.has(artifact.id))
-          .sort((a, b) => b.timestamp - a.timestamp)
-          .slice(0, 50);
-        return {
-          content: [{ type: "text", text: formatArtifactCatalog(records) }],
-          details: { action: "list", count: records.length, records },
-        };
+        const records = [...visible].sort((a, b) => b.timestamp - a.timestamp).slice(0, 50);
+        return { content: [{ type: "text", text: formatArtifactCatalog(records) }], details: { action: "list", count: records.length, records } };
       }
       if (params.action === "search") {
         if (!params.query?.trim()) {
           return { content: [{ type: "text", text: "user_artifact search requires query." }], isError: true, details: { action: "search" } };
         }
-        const records = await searchUserArtifacts(sessionId, params.query, 20, branchIds);
+        const allowedKeys = new Set(visible.map(userArtifactKey));
+        const sources = await artifactSourcesForContext(ctx);
+        const catalog = await loadUserArtifactCatalog(sources);
+        const records = await searchUserArtifactCatalog(catalog, params.query, 20, allowedKeys);
         return {
           content: [{ type: "text", text: records.length ? formatArtifactCatalog(records) : `No oversized human user source matched: ${params.query}` }],
           details: { action: "search", query: params.query, records },
@@ -148,23 +263,31 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         return { content: [{ type: "text", text: "user_artifact read requires id (for example U0001)." }], isError: true, details: { action: "read" } };
       }
       const requestedId = params.id.trim();
-      if (!branchIds.has(requestedId)) {
-        return { content: [{ type: "text", text: `User artifact ${requestedId} is not available on the current session branch.` }], isError: true, details: { action: "read", id: requestedId } };
+      const requestedSource = params.sourceSessionId?.trim();
+      const matches = visible.filter((artifact) => artifact.id === requestedId
+        && (!requestedSource || artifact.sourceSessionId === requestedSource));
+      if (matches.length === 0) {
+        return { content: [{ type: "text", text: `User artifact ${requestedId}${requestedSource ? ` from sourceSessionId=${requestedSource}` : ""} is not available on the current session branch or inherited fork lineage.` }], isError: true, details: { action: "read", id: requestedId, sourceSessionId: requestedSource } };
       }
-      const found = await readUserArtifact(sessionId, requestedId);
+      if (matches.length > 1 && !requestedSource) {
+        const sources = matches.map((artifact) => artifact.sourceSessionId ?? "unknown");
+        return { content: [{ type: "text", text: `User artifact ${requestedId} is ambiguous across visible fork sources. Retry with sourceSessionId. Visible sources: ${sources.join(", ")}` }], isError: true, details: { action: "read", id: requestedId, sources } };
+      }
+      const found = await readCatalogUserArtifact(matches[0]!);
       if (!found) {
-        return { content: [{ type: "text", text: `User artifact ${params.id.trim()} was not found in this session.` }], isError: true, details: { action: "read", id: params.id.trim() } };
+        return { content: [{ type: "text", text: `User artifact ${requestedId} could not be read from its preserved source session.` }], isError: true, details: { action: "read", id: requestedId, sourceSessionId: matches[0]?.sourceSessionId } };
       }
-      const start = Math.min(params.startChar ?? 0, found.text.length);
+      const startChar = Math.min(params.startChar ?? 0, found.text.length);
       const maxChars = Math.min(params.maxChars ?? 16_000, 50_000);
-      const end = Math.min(found.text.length, start + maxChars);
-      const slice = found.text.slice(start, end);
-      const trailer = end < found.text.length
-        ? `\n\n[${found.record.id}: showing chars ${start.toLocaleString()}-${end.toLocaleString()} of ${found.text.length.toLocaleString()}; continue with startChar=${end}]`
-        : `\n\n[${found.record.id}: end of exact source; ${found.text.length.toLocaleString()} chars total]`;
+      const endChar = Math.min(found.text.length, startChar + maxChars);
+      const slice = found.text.slice(startChar, endChar);
+      const sourceLabel = `${found.record.id} sourceSessionId=${found.record.sourceSessionId ?? "unknown"}`;
+      const trailer = endChar < found.text.length
+        ? `\n\n[${sourceLabel}: showing chars ${startChar.toLocaleString()}-${endChar.toLocaleString()} of ${found.text.length.toLocaleString()}; continue with startChar=${endChar}]`
+        : `\n\n[${sourceLabel}: end of exact source; ${found.text.length.toLocaleString()} chars total]`;
       return {
         content: [{ type: "text", text: `${slice}${trailer}` }],
-        details: { action: "read", id: found.record.id, startChar: start, endChar: end, totalChars: found.text.length, sha256: found.record.sha256 },
+        details: { action: "read", id: found.record.id, sourceSessionId: found.record.sourceSessionId, startChar, endChar, totalChars: found.text.length, sha256: found.record.sha256 },
       };
     },
   });
@@ -184,8 +307,8 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       try {
         loaded = await loadConfig(ctx);
         if (loaded.config.enabled) {
-          await storeUserArtifact({
-            sessionId: ctx.sessionManager.getSessionId(),
+          await preserveIncomingUserArtifact({
+            ctx,
             text: event.text,
             timestamp: Date.now(),
             thresholdChars: loaded.config.userArtifactThresholdChars,
@@ -300,31 +423,27 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       config.userMessageChars,
     );
 
-    const sessionId = ctx.sessionManager.getSessionId();
-    let artifacts: UserArtifactRecord[] = [];
+    let branchArtifacts: UserArtifactRecord[] = [];
+    let knownArtifacts: UserArtifactLocator[] = [];
+    let previousKnownArtifacts: UserArtifactLocator[] = [];
+    let previousBranchReferences: DurableUserReference[] = [];
     try {
-      await backfillUserArtifacts({
-        sessionId,
+      const artifactContext = await loadBranchArtifactContext({
+        ctx,
         branchEntries: event.branchEntries,
         thresholdChars: config.userArtifactThresholdChars,
         previewChars: config.userArtifactPreviewChars,
       });
-      artifacts = (await loadUserArtifactManifest(sessionId)).artifacts;
+      branchArtifacts = artifactContext.branchArtifacts;
+      knownArtifacts = artifactContext.knownArtifacts;
+      previousKnownArtifacts = artifactContext.previousKnownArtifacts;
+      previousBranchReferences = artifactContext.previousReferences;
     } catch (error) {
-      // Artifact persistence is additive protection. A sidecar I/O failure must not
-      // make the primary compaction path unusable; details still carry known IDs.
+      // Artifact persistence is additive protection. A sidecar/parent-lineage I/O
+      // failure must not make the primary compaction path unusable.
       ctx.ui.notify(`Oversized user-source archive unavailable: ${formatError(error)}`, "warning");
     }
-    const rawBranchArtifactIds = new Set(userArtifactIdsOnBranch(artifacts, event.branchEntries));
-    const branchKnownIds = new Set([
-      ...previousArtifactState.knownIds,
-      ...rawBranchArtifactIds,
-    ]);
-    const branchArtifacts = artifacts.filter((artifact) => branchKnownIds.has(artifact.id));
-    const knownArtifactIds = [...branchKnownIds];
-    // Previous v4 state came from this exact branch and remains valid even if a
-    // future Pi stops exposing some very old raw entries through getBranch().
-    const previousBranchReferences = previousArtifactState.references;
+    const knownArtifactIds = [...new Set(knownArtifacts.map((artifact) => artifact.id))];
 
     const executionView = serializeExecutionView(
       allDiscarded,
@@ -334,7 +453,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const artifactCandidates = uniqueArtifactCandidates({
       artifacts: branchArtifacts,
       previous: previousBranchReferences,
-      knownIds: previousArtifactState.knownIds,
+      knownArtifacts: previousKnownArtifacts,
       recalledIds: referencedArtifactIds(executionView),
     });
     const artifactCandidateText = renderArtifactCandidates({
@@ -342,14 +461,15 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       previous: previousBranchReferences,
       maxChars: config.userArtifactCandidateChars,
     });
-    const exposedArtifactIds = new Set(referencedArtifactIds(artifactCandidateText));
-    const exposedArtifactCandidates = artifactCandidates.filter((artifact) => exposedArtifactIds.has(artifact.id));
+    const exposedArtifactCandidates = artifactCandidates.filter((artifact) => artifactWasRendered(artifactCandidateText, artifact));
+    const exposedArtifactKeys = new Set(exposedArtifactCandidates.map(userArtifactKey));
 
     const deterministicWithoutGit: DeterministicState = {
       ...fileState,
       userMessages,
       durableUserReferences: previousBranchReferences,
       userArtifacts: branchArtifacts,
+      knownUserArtifacts: knownArtifacts,
       knownUserArtifactIds: knownArtifactIds,
       ...(intentWorkflow.active ? { intentWorkflow } : {}),
     };
@@ -440,15 +560,15 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       progress.merging();
       const evaluatedReferences = reconcileDurableUserReferences({
         candidates: exposedArtifactCandidates,
-        previous: previousBranchReferences.filter((reference) => exposedArtifactIds.has(reference.id)),
+        previous: previousBranchReferences.filter((reference) => exposedArtifactKeys.has(userArtifactKey(reference))),
         llmText: intent.text,
       });
       // A reference that could not fit into this compaction's candidate prompt is
       // not counted as an omission; preserve its lifecycle until the LLM actually
       // has a chance to evaluate it.
-      const unevaluatedPrevious = previousBranchReferences.filter((reference) => !exposedArtifactIds.has(reference.id));
+      const unevaluatedPrevious = previousBranchReferences.filter((reference) => !exposedArtifactKeys.has(userArtifactKey(reference)));
       const referenceMap = new Map<string, DurableUserReference>();
-      for (const reference of [...unevaluatedPrevious, ...evaluatedReferences]) referenceMap.set(reference.id, reference);
+      for (const reference of [...unevaluatedPrevious, ...evaluatedReferences]) referenceMap.set(userArtifactKey(reference), reference);
       const durableUserReferences = [...referenceMap.values()];
 
       const deterministic: DeterministicState = {
