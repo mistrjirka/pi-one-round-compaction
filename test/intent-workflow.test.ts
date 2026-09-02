@@ -150,6 +150,77 @@ Implement strict AI review tools and Qdrant indexes.
   }
 });
 
+test("a filesystem touch alone never binds the project-global current workstream to this session", async () => {
+  const repo = await makeRepo("pi-intent-mtime-");
+  const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-mtime-"));
+  const previous = process.env.PI_WORK_HOME;
+  process.env.PI_WORK_HOME = workHome;
+  try {
+    const projectWork = path.join(workHome, "projects", projectKey(repo));
+    const intentDir = path.join(projectWork, "intents", "other-session-task");
+    await mkdir(intentDir, { recursive: true });
+    await writeFile(path.join(projectWork, "project-root.txt"), `${repo}\n`);
+    await symlink(path.join("intents", "other-session-task"), path.join(projectWork, "current"));
+    await writeFile(path.join(intentDir, "intent.md"), "# Current intent\n\nWork selected by another concurrent session.\n");
+
+    const detected = await detectIntentWorkflow(repo);
+    assert.equal(detected.active, true);
+    if (!detected.active) return;
+    const activated = activateIntentWorkflowForSession(detected, [], detected.lastTouchedAtMs - 10_000);
+    assert.deepEqual(activated, { active: false, reason: "not-used-in-session" });
+  } finally {
+    if (previous === undefined) delete process.env.PI_WORK_HOME;
+    else process.env.PI_WORK_HOME = previous;
+  }
+});
+
+test("newest workflow checkpoint wins over an older matching workstream", async () => {
+  const repo = await makeRepo("pi-intent-newest-");
+  const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-newest-"));
+  const previous = process.env.PI_WORK_HOME;
+  process.env.PI_WORK_HOME = workHome;
+  try {
+    const projectWork = path.join(workHome, "projects", projectKey(repo));
+    const intentDir = path.join(projectWork, "intents", "issue-993");
+    await mkdir(intentDir, { recursive: true });
+    await writeFile(path.join(projectWork, "project-root.txt"), `${repo}\n`);
+    await symlink(path.join("intents", "issue-993"), path.join(projectWork, "current"));
+    await writeFile(path.join(intentDir, "intent.md"), "# Current intent\n\nIssue 993.\n");
+    const detected = await detectIntentWorkflow(repo);
+    assert.equal(detected.active, true);
+    if (!detected.active) return;
+    const entries = [
+      {
+        type: "compaction", id: "old", parentId: null, timestamp: new Date().toISOString(), summary: "old",
+        firstKeptEntryId: "x", tokensBefore: 1,
+        details: { plugin: "pi-one-round-compaction", intentWorkflow: { active: true, workstream: "issue-993", generation: 1 } },
+      },
+      {
+        type: "compaction", id: "new", parentId: null, timestamp: new Date().toISOString(), summary: "new",
+        firstKeptEntryId: "y", tokensBefore: 1,
+        details: { plugin: "pi-one-round-compaction", intentWorkflow: { active: true, workstream: "different-task", generation: 1 } },
+      },
+    ] as never;
+    assert.deepEqual(
+      activateIntentWorkflowForSession(detected, entries, 0),
+      { active: false, reason: "not-used-in-session" },
+    );
+    assert.equal(shouldCarryPreviousCheckpointForIntent(entries, { active: false, reason: "not-used-in-session" }), false);
+  } finally {
+    if (previous === undefined) delete process.env.PI_WORK_HOME;
+    else process.env.PI_WORK_HOME = previous;
+  }
+});
+
+test("normal previous checkpoints still carry when no intent workflow is active", () => {
+  const entries = [{
+    type: "compaction", id: "normal", parentId: null, timestamp: new Date().toISOString(), summary: "normal",
+    firstKeptEntryId: "x", tokensBefore: 1,
+    details: { plugin: "pi-one-round-compaction", intentWorkflow: { active: false } },
+  }] as never;
+  assert.equal(shouldCarryPreviousCheckpointForIntent(entries, { active: false, reason: "no-active-ledger" }), true);
+});
+
 test("pending reconciliation suppresses the old durable contract and previous checkpoint generation", async () => {
   const repo = await makeRepo("pi-intent-pending-");
   const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-pending-"));

@@ -474,7 +474,17 @@ Implement strict tools and Qdrant indexes.
       },
     };
 
+    const activationMessage = {
+      ...assistant(""),
+      content: [{
+        type: "toolCall" as const,
+        id: "activate-intent",
+        name: "bash",
+        arguments: { command: "bash skills/intent-workflow/scripts/new-intent.sh --resume strict-tools-qdrant" },
+      }],
+    };
     const branchEntries = [
+      entry("activate", activationMessage as never),
       entry("u1", user(`old-${"x".repeat(120)}`)),
       entry("a1", assistant(`old-${"x".repeat(120)}`)),
       entry("u2", user(`middle-${"x".repeat(120)}`)),

@@ -241,26 +241,24 @@ export function activateIntentWorkflowForSession(
 ): IntentWorkflowDetection {
   if (!detection.active) return detection;
 
-  // A create/reuse/edit performed after this extension instance loaded is direct evidence.
-  // A small tolerance avoids filesystem timestamp granularity/race issues.
-  if (detection.lastTouchedAtMs >= extensionLoadedAtMs - 2_000) return detection;
-
-  for (const entry of entries) {
-    if (entry.type === "compaction" && isRecord(entry.details)) {
-      const workflow = entry.details.intentWorkflow;
-      if (
-        isRecord(workflow)
-        && workflow.active === true
-        && workflow.workstream === detection.workstream
-        && (
-          workflow.generation === detection.generation
-          || (workflow.generation === undefined && detection.generation === 1)
-        )
-      ) {
-        return detection;
-      }
-    }
+  // Bind from evidence persisted in THIS Pi session. Filesystem mtimes and the
+  // project-global `current` symlink are intentionally not activation evidence:
+  // another concurrent Pi session can update both. Walk newest-first so a later
+  // workstream/checkpoint supersedes an older matching one.
+  void extensionLoadedAtMs; // retained in the public signature for compatibility.
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
     if (assistantMessageTouchesWorkflow(entry, detection)) return detection;
+    if (entry.type !== "compaction" || !isRecord(entry.details)) continue;
+    const workflow = entry.details.intentWorkflow;
+    if (!isRecord(workflow)) continue;
+    if (workflow.active !== true) return { active: false, reason: "not-used-in-session" };
+    if (workflow.workstream !== detection.workstream) return { active: false, reason: "not-used-in-session" };
+    if (workflow.generation === detection.generation
+      || (workflow.generation === undefined && detection.generation === 1)) {
+      return detection;
+    }
+    return { active: false, reason: "not-used-in-session" };
   }
 
   // A persistent `current` symlink alone may be from a previous task. Do not let
@@ -350,18 +348,26 @@ export function shouldCarryPreviousCheckpointForIntent(
   entries: SessionEntry[],
   detection: IntentWorkflowDetection,
 ): boolean {
-  if (!detection.active) return detection.reason !== "pending-reconciliation";
-
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i]!;
     if (entry.type !== "compaction" || !isRecord(entry.details)) continue;
     const workflow = entry.details.intentWorkflow;
+
+    if (!detection.active) {
+      // A normal previous checkpoint is safe to continue in normal mode. A
+      // workflow checkpoint is not: when the workflow is pending, invalid, gone,
+      // or unrelated to this session, carrying its implementation lane can revive
+      // stale scope even though the durable contract itself was suppressed.
+      return !isRecord(workflow) || workflow.active !== true;
+    }
+
     if (!isRecord(workflow) || workflow.active !== true) return false;
     if (workflow.workstream !== detection.workstream) return false;
     return workflow.generation === detection.generation
       || (workflow.generation === undefined && detection.generation === 1);
   }
-  return true;
+
+  return detection.active || detection.reason !== "pending-reconciliation";
 }
 
 export interface IntentWorkflowRenderOptions {

@@ -111,12 +111,7 @@ Inside Pi run:
 
 `/one-round-compaction` should show the effective configuration, both LLM lanes, prompt sources, recent-turn retention settings, and whether the intent workflow is active for the current project.
 
-The default compaction model is:
-
-```text
-opencode-go/muse-spark-1.2-contributor
-thinking: low
-```
+The default compaction model is `opencode-go/muse-spark-1.2-contributor`. The continuation/task-semantics lane defaults to **medium** thinking because losing the current objective or next action is disproportionately costly; the evidence/execution lane remains **low**. Both are independently configurable.
 
 If that provider/model is not available in your Pi setup, configure another model as described below before triggering compaction.
 
@@ -150,6 +145,7 @@ For example:
   "thinkingLevel": "low",
   "lanes": {
     "intent": {
+      "thinkingLevel": "medium",
       "maxOutputTokens": 3072
     },
     "execution": {
@@ -358,12 +354,13 @@ ${PI_WORK_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/pi-work}/projects/
     project-root.txt
     current -> intents/<workstream>/
       intent.md
+      intent-state.json  # optional machine-readable generation/status
       plan.md   # optional
 ```
 
 Detection verifies the canonical project root, the root hash/binding, that `current` resolves inside that project's `intents/` directory, and that `intent.md` contains a non-empty `# Current intent`. Because the workflow's `current` symlink can persist after an old task, a valid pointer alone is not enough: the current Pi session must also have touched/activated that workstream, or a prior compaction in the same session must already have confirmed it. Missing, stale, unconfirmed, invalid, or unrelated ledgers simply select normal compaction mode.
 
-In active mode the plugin re-reads `intent.md` and `plan.md` from disk on every compaction. It extracts the current intent contract sections (`Current intent`, navigation context, direct user quotes, interpretation corrections, accepted behavior, hard constraints, boundaries, accepted decisions, acceptance checks, and open questions) while deliberately omitting `Evolution history`. The persisted checkpoint keeps a bounded prioritized intent contract plus the exact `intent.md`/`plan.md` paths; it does **not** paste the full plan. The LLM lanes receive only a small bounded plan excerpt for orientation. When `plan.md` exists, the checkpoint explicitly identifies it as the maintained evolving workflow plan and tells the agent to read the exact file before implementation when plan detail governs the work. Newer explicit user instructions still override stale workflow state. Known untouched template-placeholder lines are also removed. The plugin is read-only: it never creates or modifies intent-workflow files.
+In active mode the plugin re-reads `intent.md` and `plan.md` from disk on every compaction. When `intent-state.json` is present, it also reads its intent generation/status. A `pending_reconciliation` generation suppresses the old durable contract and previous-generation checkpoint and renders a deterministic reconciliation reminder instead; legacy workstreams without the state file remain active generation 1. Once confirmed, prior checkpoint continuation state is reused only when workstream **and generation** match. It extracts the current intent contract sections (`Current intent`, navigation context, direct user quotes, interpretation corrections, accepted behavior, hard constraints, boundaries, accepted decisions, acceptance checks, and open questions) while deliberately omitting `Evolution history`. The persisted checkpoint keeps a bounded prioritized intent contract plus the exact `intent.md`/`plan.md` paths; it does **not** paste the full plan. The LLM lanes receive only a small bounded plan excerpt for orientation. When `plan.md` exists, the checkpoint explicitly identifies it as the maintained evolving workflow plan and tells the agent to read the exact file before implementation when plan detail governs the work. Newer explicit user instructions still override stale workflow state. Known untouched template-placeholder lines are also removed. The plugin is read-only: it never creates or modifies intent-workflow files.
 
 The ledger remains context rather than absolute authority. Newer retained raw user messages override stale ledger content, matching the intent-workflow's own precedence rule.
 
@@ -384,6 +381,7 @@ It is explicitly forbidden from turning historical work back into current scope.
 
 Receives the compacted prefix with tool calls and truncated tool results. Generated extension/custom/bash messages remain available as execution evidence, but are explicitly labeled as generated evidence and truncated instead of being mislabeled as human user instructions. Hidden reasoning is omitted by default. It owns only:
 
+- a short **Continuation Anchor**: current phase, immediate next action, active delegated run/wait identifiers, blockers/decisions, and do-not-redo facts
 - completed/current implementation state
 - relevant code/repository state
 - verification/test state
@@ -394,10 +392,16 @@ Receives the compacted prefix with tool calls and truncated tool results. Genera
 
 When a valid active ledger is detected, task semantics are no longer reconstructed by an LLM. A bounded prioritized view of `intent.md` plus the intent/plan paths is preserved deterministically; `plan.md` is referenced rather than copied wholesale into every checkpoint. The two parallel calls are repurposed:
 
-- first lane: implementation continuation state (`Done`, current code/repository state, material discoveries, remaining/immediate actions)
-- second lane: verification/evidence state (tests/checks, important failures, unresolved risks/open questions, critical exact context)
+- first lane: implementation continuation state, beginning with a short protected **Continuation Anchor**, then `Done`, current code/repository state, material discoveries, and remaining/immediate actions
+- second lane: verification/evidence state, beginning with an **Evidence Anchor** for unresolved required checks/blockers, then tests/checks, important failures, unresolved risks/open questions, and critical exact context
 
 Both lanes are explicitly forbidden from redefining or broadening the durable intent. Newer explicit user instructions in the compacted conversation and the retained raw turns still outrank the ledger.
+
+### Continuation protection across repeated compactions
+
+The previous LLM checkpoint is not carried forward by simply clipping its first N characters. Each lane is parsed by heading and re-ordered by continuation priority before the bounded carry-forward: immediate next action / active-run / blocker state comes before historical `Done` or long verification chronology. If a summarizer omits the required continuation/evidence anchor, the plugin deterministically reconstructs it from that lane's `Remaining / Immediate Next Actions` or unresolved-risk section; if neither exists it emits an explicit unknown-state warning instead of silently inventing a next action.
+
+Long generated evidence such as tool results, bash output, and subagent completion messages is clipped **head + tail**, not head-only, so terminal status, run IDs, and final handoff lines are less likely to disappear while the middle bulk remains bounded.
 
 ### Deterministic state
 
