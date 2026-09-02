@@ -251,6 +251,19 @@ function assistantMessageTouchesWorkflow(entry: SessionEntry, snapshot: ActiveIn
   return false;
 }
 
+function compactionMatchesGeneration(entry: SessionEntry, snapshot: ActiveIntentWorkflow): boolean {
+  if (entry.type !== "compaction" || !isRecord(entry.details)) return false;
+  const workflow = entry.details.intentWorkflow;
+  if (!isRecord(workflow) || workflow.active !== true || workflow.workstream !== snapshot.workstream) return false;
+
+  const marker = entry.summary.match(/Intent generation:\s*(\d+)/);
+  if (marker) return Number.parseInt(marker[1]!, 10) === snapshot.generation;
+
+  // Checkpoints produced before generation markers existed represent the legacy
+  // generation-1 contract only. They must never activate a later generation.
+  return snapshot.generation === 1;
+}
+
 export function activateIntentWorkflowForSession(
   detection: IntentWorkflowDetection,
   entries: SessionEntry[],
@@ -263,16 +276,7 @@ export function activateIntentWorkflowForSession(
   if (detection.lastTouchedAtMs >= extensionLoadedAtMs - 2_000) return detection;
 
   for (const entry of entries) {
-    if (entry.type === "compaction" && isRecord(entry.details)) {
-      const workflow = entry.details.intentWorkflow;
-      if (
-        isRecord(workflow)
-        && workflow.active === true
-        && workflow.workstream === detection.workstream
-      ) {
-        return detection;
-      }
-    }
+    if (compactionMatchesGeneration(entry, detection)) return detection;
     if (assistantMessageTouchesWorkflow(entry, detection)) return detection;
   }
 
