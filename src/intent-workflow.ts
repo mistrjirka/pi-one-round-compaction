@@ -209,14 +209,15 @@ function parseIntentState(raw: string | undefined): IntentWorkflowStateV1 | unde
   return { version: 1, generation: value.generation, status: value.status };
 }
 
-async function resolveProjectPointer(projectWork: string, name: "current" | "pending"):
-Promise<{ dir: string; touchedAtMs: number } | undefined> {
+async function resolveProjectPointer(
+  projectWork: string,
+  name: "current" | "pending",
+): Promise<{ dir: string; touchedAtMs: number } | undefined> {
   const pointerPath = path.join(projectWork, name);
   try {
     const [dir, info] = await Promise.all([realpath(pointerPath), lstat(pointerPath)]);
     return { dir, touchedAtMs: info.mtimeMs };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+  } catch {
     return undefined;
   }
 }
@@ -302,6 +303,15 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
   const projectKey = `${projectSlug}-${projectHash}`;
   const projectWork = path.join(workHome(), "projects", projectKey);
 
+  // Absence of both pointers means this project has no active/pending ledger. Keep
+  // that legacy semantic before validating metadata that may not exist yet.
+  const [currentPointer, pendingPointer] = await Promise.all([
+    resolveProjectPointer(projectWork, "current"),
+    resolveProjectPointer(projectWork, "pending"),
+  ]);
+  if (!currentPointer && !pendingPointer) return { active: false, reason: "no-active-ledger" };
+  if (currentPointer && pendingPointer) return { active: false, reason: "invalid-intent-state" };
+
   const recordedRoot = (await readOptional(path.join(projectWork, "project-root.txt")))?.trim();
   if (!recordedRoot) return { active: false, reason: "stale-project-root" };
   try {
@@ -318,13 +328,7 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
     return { active: false, reason: "invalid-current-target" };
   }
 
-  const [currentPointer, pendingPointer] = await Promise.all([
-    resolveProjectPointer(projectWork, "current"),
-    resolveProjectPointer(projectWork, "pending"),
-  ]);
-  if (currentPointer && pendingPointer) return { active: false, reason: "invalid-intent-state" };
-  const pointer = currentPointer ?? pendingPointer;
-  if (!pointer) return { active: false, reason: "no-active-ledger" };
+  const pointer = currentPointer ?? pendingPointer!;
   if (!pointer.dir.startsWith(`${realIntentsRoot}${path.sep}`)) {
     return { active: false, reason: "invalid-current-target" };
   }
