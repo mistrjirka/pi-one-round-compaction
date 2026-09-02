@@ -72,7 +72,7 @@ function matchingArtifact(artifacts: UserArtifactRecord[], locator: UserArtifact
     && (!locator.sourceSessionId || artifact.sourceSessionId === locator.sourceSessionId));
 }
 
-function uniqueArtifactCandidates(params: {
+export function uniqueArtifactCandidates(params: {
   artifacts: UserArtifactRecord[];
   previous: DurableUserReference[];
   knownArtifacts: UserArtifactLocator[];
@@ -89,11 +89,10 @@ function uniqueArtifactCandidates(params: {
     ordered.push(record);
   };
 
-  for (const reference of [...params.previous].sort((a, b) => {
-    if (a.state !== b.state) return a.state === "active" ? -1 : 1;
-    return a.id.localeCompare(b.id);
-  })) push(matchingArtifact(params.artifacts, reference));
-
+  // Newly seen exact user sources get first chance at semantic classification.
+  // Existing references are preserved unchanged when they do not fit the current
+  // candidate budget, so putting old active sources first can starve a new governing
+  // correction/specification without protecting anything.
   for (const artifact of [...params.artifacts]
     .filter((artifact) => !known.has(userArtifactKey(artifact)))
     .sort((a, b) => b.timestamp - a.timestamp)) push(artifact);
@@ -101,6 +100,11 @@ function uniqueArtifactCandidates(params: {
   for (const id of params.recalledIds) {
     for (const artifact of params.artifacts) if (artifact.id === id) push(artifact);
   }
+
+  for (const reference of [...params.previous].sort((a, b) => {
+    if (a.state !== b.state) return a.state === "active" ? -1 : 1;
+    return a.id.localeCompare(b.id);
+  })) push(matchingArtifact(params.artifacts, reference));
   return ordered;
 }
 

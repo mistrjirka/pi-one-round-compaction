@@ -97,6 +97,32 @@ test("intent view excludes synthetic extension messages even though Pi maps them
   assert.doesNotMatch(text, /Background task completed/);
 });
 
+test("intent view keeps generated branch summaries as explicitly non-authoritative semantic evidence", () => {
+  const messages = [
+    user("yes, keep that behavior"),
+    {
+      role: "branchSummary" as const,
+      summary: "The immediately preceding accepted proposal was to keep old reviews on the legacy UI and upgrade on rerun.",
+      timestamp: Date.now(),
+    },
+  ];
+  const text = serializeIntentView(messages as never);
+  assert.match(text, /yes, keep that behavior/);
+  assert.match(text, /Generated prior summary evidence — not user authority/);
+  assert.match(text, /keep old reviews on the legacy UI/);
+});
+
+test("intent view keeps both ends of a long assistant proposal so short user acceptance remains interpretable", () => {
+  const messages = [
+    assistant(`Proposal start: ${"middle ".repeat(900)} FINAL DECISION: rerun upgrades the legacy review.`),
+    user("yes"),
+  ];
+  const text = serializeIntentView(messages);
+  assert.match(text, /Proposal start/);
+  assert.match(text, /FINAL DECISION: rerun upgrades the legacy review/);
+  assert.match(text, /\[User\]: yes/);
+});
+
 test("execution view labels and truncates extension messages as evidence rather than user input", () => {
   const messages = [{
     role: "custom" as const,
@@ -109,6 +135,35 @@ test("execution view labels and truncates extension messages as evidence rather 
   assert.match(text, /^\[Extension message: pi-subagents\]: Background task completed:/);
   assert.match(text, /chars omitted/);
   assert.ok(text.length < 180);
+});
+
+test("execution view gives final subagent notification more room than transcript/status evidence", () => {
+  const messages = [
+    {
+      role: "custom" as const,
+      customType: "subagent-notify",
+      content: `Background task completed: workflow\n${"child-evidence ".repeat(500)}\nWorkflow run: wf-final`,
+      display: true,
+      timestamp: Date.now(),
+    },
+    {
+      role: "toolResult" as const,
+      toolCallId: "transcript",
+      toolName: "subagent",
+      content: [{ type: "text" as const, text: `Transcript target: run-1\n${"overlap ".repeat(1000)}\nTAIL` }],
+      isError: false,
+      timestamp: Date.now(),
+    },
+  ];
+  const text = serializeExecutionView(messages as never, 2_000, 0);
+  const notifyStart = text.indexOf("[Extension message: subagent-notify]");
+  const transcriptStart = text.indexOf("[Tool result: subagent]");
+  assert.ok(notifyStart >= 0 && transcriptStart > notifyStart);
+  const notify = text.slice(notifyStart, transcriptStart);
+  const transcript = text.slice(transcriptStart);
+  assert.ok(notify.length > 6_000, notify.length.toString());
+  assert.ok(transcript.length < 2_200, transcript.length.toString());
+  assert.match(notify, /Workflow run: wf-final/);
 });
 
 test("execution view preserves both ends of long subagent completion messages", () => {
@@ -142,6 +197,62 @@ test("execution view truncates tool results", () => {
   const text = serializeExecutionView(messages, 20, 0);
   assert.match(text, /20 more|80 chars omitted|chars omitted/);
   assert.ok(text.length < 100);
+});
+
+test("execution view gives dense structural results more room than raw reads", () => {
+  const dense = "DENSE-END" + "x".repeat(4_500);
+  const raw = "RAW-END" + "y".repeat(4_500);
+  const messages = [
+    {
+      role: "toolResult" as const,
+      toolCallId: "1",
+      toolName: "codegraph_explore",
+      content: [{ type: "text" as const, text: dense }],
+      isError: false,
+      timestamp: Date.now(),
+    },
+    {
+      role: "toolResult" as const,
+      toolCallId: "2",
+      toolName: "read",
+      content: [{ type: "text" as const, text: raw }],
+      isError: false,
+      timestamp: Date.now(),
+    },
+  ];
+  const text = serializeExecutionView(messages, 2_000, 0);
+  assert.match(text, /\[Tool result: codegraph_explore\]/);
+  assert.match(text, /\[Tool result: read\]/);
+  const denseBlock = text.slice(text.indexOf("[Tool result: codegraph_explore]"), text.indexOf("[Tool result: read]"));
+  const rawBlock = text.slice(text.indexOf("[Tool result: read]"));
+  assert.ok(denseBlock.length > 4_000, denseBlock.length.toString());
+  assert.ok(rawBlock.length < 2_200, rawBlock.length.toString());
+});
+
+test("execution view replaces exact user_artifact body with a durable locator", () => {
+  const messages = [{
+    role: "toolResult" as const,
+    toolCallId: "artifact-1",
+    toolName: "user_artifact",
+    content: [{ type: "text" as const, text: `EXACT SECRET PLAN ${"z".repeat(20_000)}` }],
+    details: {
+      action: "read",
+      id: "U0007",
+      sourceSessionId: "parent-session",
+      startChar: 0,
+      endChar: 20_018,
+      totalChars: 20_018,
+    },
+    isError: false,
+    timestamp: Date.now(),
+  }];
+  const text = serializeExecutionView(messages as never, 2_000, 0);
+  assert.match(text, /\[Tool result: user_artifact\]/);
+  assert.match(text, /id=U0007/);
+  assert.match(text, /sourceSessionId=parent-session/);
+  assert.match(text, /exact source remains recoverable/);
+  assert.doesNotMatch(text, /EXACT SECRET PLAN/);
+  assert.ok(text.length < 400);
 });
 
 test("recent user context walks backward under a character budget", () => {
@@ -525,6 +636,54 @@ HEAD: fresh`;
   const oldHistoryIndex = (carried ?? "").indexOf("old-history");
   assert.ok(oldHistoryIndex === -1 || nextActionIndex < oldHistoryIndex);
   assert.ok((carried?.length ?? 0) <= 4_100);
+});
+
+test("previous normal intent carry-forward protects user priority and decision state", () => {
+  const prior = `# Compaction Checkpoint
+
+## Task Semantics
+## Current Objective
+Improve compaction continuity.
+
+## Accepted Plan / Scope
+- Keep two lanes.
+
+## User Priorities / Decision State
+- The user explicitly says preserving the plot after compaction is the major issue.
+
+## Constraints / Exclusions / User Corrections
+- Do not add an arbitrary 160k ceiling.
+
+## Execution State
+## Done
+- none`;
+  const carried = compactPreviousSummaryForPrompt(prior, "intent", false, 2_000);
+  assert.match(carried ?? "", /preserving the plot after compaction is the major issue/);
+  assert.match(carried ?? "", /Do not add an arbitrary 160k ceiling/);
+});
+
+test("previous workflow implementation carry-forward protects unreconciled user contract delta", () => {
+  const prior = `# Compaction Checkpoint
+
+## Durable Intent Workflow
+old ledger
+
+## Implementation State
+## Continuation Anchor
+- reconcile user correction
+
+## User Contract Delta
+RECONCILIATION REQUIRED: keep old reviews on legacy UI until rerun.
+
+## Done
+${"history ".repeat(2000)}
+
+## Verification / Evidence State
+## Evidence Anchor
+COMPLETE`;
+  const carried = compactPreviousSummaryForPrompt(prior, "intent", true, 2_000);
+  assert.match(carried ?? "", /RECONCILIATION REQUIRED/);
+  assert.match(carried ?? "", /keep old reviews on legacy UI until rerun/);
 });
 
 test("previous evidence carry-forward protects unresolved risk from long verification chronology", () => {

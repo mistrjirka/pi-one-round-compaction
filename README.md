@@ -16,7 +16,7 @@ older context
 + newest complete turns retained verbatim
 ```
 
-The two LLM calls run concurrently. Neither call sees the other call's output and there is no LLM verifier/finalizer.
+The two LLM calls run concurrently. Neither call sees the other call's output and there is no LLM verifier/finalizer. User acceptance/rejection, relative priority, and corrections are treated as task semantics in the stronger intent lane rather than delegated to a third "sentiment" model; this avoids a third interpretation/merge path over the same evidence.
 
 When the project uses the DEVEON-style `intent-workflow`, the plugin auto-detects the active external ledger and changes roles automatically:
 
@@ -297,7 +297,7 @@ Only native persisted `role: "user"` messages are eligible. Extension/custom mes
 
 Forked Pi sessions inherit exact user artifacts read-only through the persisted `parentSession` lineage. The child does not copy the parent's exact files into its own manifest. Provenance is carried as `sourceSessionId`, and new child-local U#### IDs are allocated above inherited IDs so a new child artifact cannot collide with an inherited `U0001`. The tool exposes only artifacts that are actually present on the active branch through raw human messages or prior compaction metadata; it does not expose an ancestor's entire catalog.
 
-The intent/implementation LLM lane receives bounded metadata/previews and performs the semantic decision. When candidates are present it appends `## Durable User Sources` and labels each relevant source with a semantic `kind` (`plan`, `spec`, `requirements`, `correction`, `log`, `evidence`, or `other`) and `authority` (`governing` or `supporting`). The deterministic layer never guesses these labels. `governing` is reserved for exact current user instructions that control planning, delegation, editing, or implementation; logs and ordinary evidence remain `supporting` and are retrieved only on demand.
+The intent/implementation LLM lane receives bounded metadata/previews and performs the semantic decision. Newly seen oversized user sources are offered for classification before older durable references: older references that do not fit are preserved unevaluated, while a new correction/specification must not be starved out by historical active sources. When candidates are present it appends `## Durable User Sources` and labels each relevant source with a semantic `kind` (`plan`, `spec`, `requirements`, `correction`, `log`, `evidence`, or `other`) and `authority` (`governing` or `supporting`). The deterministic layer never guesses these labels. `governing` is reserved for exact current user instructions that control planning, delegation, editing, or implementation; logs and ordinary evidence remain `supporting` and are retrieved only on demand.
 
 References use a two-compaction hysteresis:
 
@@ -368,18 +368,21 @@ The ledger remains context rather than absolute authority. Newer retained raw us
 
 ### Normal mode: intent/scope lane
 
-Receives native human user messages from the compacted prefix and concise assistant text. Tool results, hidden reasoning, and extension/custom messages are omitted from task semantics even though Pi maps some of those generated messages to provider `role=user`. It owns only:
+Receives native human user messages from the compacted prefix and concise assistant text. Long assistant proposals keep both their head and tail so a later short `yes`/`no` can still be interpreted. Branch/compaction summaries may be supplied as explicitly labeled **generated, non-authoritative** semantic evidence for fork/resume continuity. Tool results, hidden reasoning, and ordinary extension/custom messages remain omitted from task semantics even though Pi maps some of those generated messages to provider `role=user`. It owns only:
 
 - current objective
 - accepted plan/scope
+- explicit user priorities / acceptance / rejection / unresolved decision state
 - constraints and exclusions
 - user corrections/non-goals
+
+The intent lane preserves operational decision signals, not inferred emotion or generic sentiment.
 
 It is explicitly forbidden from turning historical work back into current scope.
 
 ### Normal mode: execution-state lane
 
-Receives the compacted prefix with tool calls and truncated tool results. Generated extension/custom/bash messages remain available as execution evidence, but are explicitly labeled as generated evidence and truncated instead of being mislabeled as human user instructions. Hidden reasoning is omitted by default. It owns only:
+Receives the compacted prefix with tool calls and bounded tool results. Tool-result labels retain the tool name and error state. Raw source/file outputs and overlapping `subagent` transcript/status tool results keep the normal small budget. The larger bounded evidence budget is spent on the final `subagent-notify` handoff/child-results message and on higher-density structural results such as CodeGraph/module reports, targeted symbol/structural search, and session/memory search. `user_artifact read` results collapse to a durable U####/source-session/range locator instead of copying a giant exact plan back into the summarizer input. Generated extension/custom/bash messages remain available as execution evidence, explicitly labeled rather than misrepresented as human user instructions. Hidden reasoning is omitted by default. It owns only:
 
 - a short **Continuation Anchor**: current phase, immediate next action, active delegated run/wait identifiers, blockers/decisions, and do-not-redo facts
 - completed/current implementation state
@@ -392,7 +395,7 @@ Receives the compacted prefix with tool calls and truncated tool results. Genera
 
 When a valid active ledger is detected, task semantics are no longer reconstructed by an LLM. A bounded prioritized view of `intent.md` plus the intent/plan paths is preserved deterministically; `plan.md` is referenced rather than copied wholesale into every checkpoint. The two parallel calls are repurposed:
 
-- first lane: implementation continuation state, beginning with a short protected **Continuation Anchor**, then `Done`, current code/repository state, material discoveries, and remaining/immediate actions
+- first lane: implementation continuation state, beginning with a short protected **Continuation Anchor** and **User Contract Delta**. Operational priority/emphasis can be preserved there without forcing intent reconciliation; only an actual newer correction/rejection/extension of the durable contract is marked `RECONCILIATION REQUIRED`. The lane then carries `Done`, current code/repository state, material discoveries, and remaining/immediate actions
 - second lane: verification/evidence state, beginning with an **Evidence Anchor** for unresolved required checks/blockers, then tests/checks, important failures, unresolved risks/open questions, and critical exact context
 
 Both lanes are explicitly forbidden from redefining or broadening the durable intent. Newer explicit user instructions in the compacted conversation and the retained raw turns still outrank the ledger.

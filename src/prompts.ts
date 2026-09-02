@@ -13,6 +13,9 @@ State the user's CURRENT objective in a few bullets or a short paragraph.
 ## Accepted Plan / Scope
 Preserve the most recent explicitly accepted plan. Keep its ordering when meaningful.
 
+## User Priorities / Decision State
+Preserve explicit acceptance/rejection, relative priorities (for example “especially this” or “this is the major issue”), unresolved choices, and satisfaction/dissatisfaction only when they materially change what should happen next. Do not infer emotional state.
+
 ## Constraints / Exclusions / User Corrections
 Preserve requirements, non-goals, explicit exclusions, "do not change" instructions, and corrections that still apply.
 
@@ -22,6 +25,7 @@ Rules:
 - Do NOT list completed debugging chronology, tests, files, or implementation details unless they define scope.
 - If the objective changed, describe only the current objective; do not make old objectives peers of it.
 - Distinguish direct user requirements from assumptions.
+- Preserve operational decision signals, not generic sentiment. A short “yes”, “no”, “that one”, or correction may depend on the immediately preceding assistant proposal; use the supplied dialogue context to resolve it conservatively.
 - Be concise.`;
 
 export const EXECUTION_LANE_PROMPT = `You own ONLY execution state. Do not redefine the user's objective or scope.
@@ -67,6 +71,9 @@ Produce exactly these headings:
 ## Continuation Anchor
 Protect the minimum state needed to resume the active workstream correctly. State the current phase, the single immediate next action, any active delegated run or external wait by exact identifier when known, current blockers/required decisions, and concise do-not-redo facts. If implementation is complete, say COMPLETE and name any remaining verification/review handoff. Keep this section short and operational.
 
+## User Contract Delta
+Compare newer explicit user instructions in the compacted conversation with the supplied durable intent. Preserve any operational priority/decision signal that materially changes what should happen next. Write RECONCILIATION REQUIRED only when the newer instruction actually corrects, rejects, or extends the durable contract itself and is not already reflected there. A change in immediate emphasis or priority alone should be written as PRIORITY plus the smallest semantic delta and reflected in the Continuation Anchor, without forcing durable-intent reconciliation. Otherwise write None. Never let the older ledger override a newer user correction.
+
 ## Done
 Only implementation work actually completed toward the active durable intent.
 
@@ -82,6 +89,7 @@ What remains NOW. The first item must be directly actionable and agree with the 
 
 Rules:
 - The Continuation Anchor is the highest-priority continuation output. Preserve an unresolved prior next action, active delegated run, blocker, or required validation until newer evidence explicitly completes, cancels, or supersedes it. Never drop it merely because older implementation history is long.
+- Preserve a non-None User Contract Delta until the durable intent is reconciled or newer explicit user evidence supersedes it.
 - The durable intent/plan block is context, but newer explicit user instructions in the conversation override it.
 - Never broaden scope beyond the durable intent or newer explicit user instructions.
 - Current verified state beats chronology.

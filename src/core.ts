@@ -179,7 +179,7 @@ function clipEvidence(text: string, maxChars: number): string {
 
 function serializeToolCallArguments(value: unknown, maxChars = 3000): string {
   try {
-    return clip(JSON.stringify(value), maxChars);
+    return clipEvidence(JSON.stringify(value), maxChars);
   } catch {
     return "[unserializable arguments]";
   }
@@ -207,15 +207,41 @@ export function serializeIntentView(messages: Parameters<typeof convertToLlm>[0]
 
     if (message.role === "assistant") {
       const text = contentText(message.content, "").trim();
-      if (text) parts.push(`[Assistant]: ${clip(text, 3500)}`);
+      if (text) parts.push(`[Assistant]: ${clipEvidence(text, 3500)}`);
       const tools = message.content
         .filter((part) => part.type === "toolCall")
         .map((part) => part.name);
       if (tools.length > 0) parts.push(`[Assistant tools]: ${tools.join(", ")}`);
     }
+
+    if (message.role === "branchSummary" || message.role === "compactionSummary") {
+      const text = convertedMessageText(message);
+      if (text) parts.push(`[Generated prior summary evidence — not user authority]: ${clipEvidence(text, 5000)}`);
+    }
   }
 
   return parts.join("\n\n");
+}
+
+function toolEvidenceBudget(toolName: string, baseChars: number): number {
+  const name = toolName.toLowerCase();
+  if (name.startsWith("codegraph") || name === "module_report" || name === "semble_search" || name === "read_symbol" || name === "session_search" || name === "memory_search") {
+    return Math.max(baseChars, Math.min(6000, baseChars * 3));
+  }
+  return baseChars;
+}
+
+function compactToolResultLocator(message: Extract<CompactionMessage, { role: "toolResult" }>): string | undefined {
+  if (message.toolName !== "user_artifact" || !isObject(message.details)) return undefined;
+  const action = typeof message.details.action === "string" ? message.details.action : undefined;
+  const id = typeof message.details.id === "string" ? message.details.id : undefined;
+  const sourceSessionId = typeof message.details.sourceSessionId === "string" ? message.details.sourceSessionId : undefined;
+  if (!action || !id) return undefined;
+  const range = typeof message.details.startChar === "number" && typeof message.details.endChar === "number"
+    ? ` chars=${message.details.startChar}-${message.details.endChar}`
+    : "";
+  const total = typeof message.details.totalChars === "number" ? ` totalChars=${message.details.totalChars}` : "";
+  return `action=${action} id=${id}${sourceSessionId ? ` sourceSessionId=${sourceSessionId}` : ""}${range}${total}; exact source remains recoverable with user_artifact`;
 }
 
 /**
@@ -263,13 +289,28 @@ export function serializeExecutionView(
 
     if (message.role === "toolResult") {
       const text = contentText(message.content, "").trim();
-      if (text) parts.push(`[Tool result]: ${clipEvidence(text, toolResultChars)}`);
+      const label = `[Tool result: ${message.toolName}${message.isError ? " ERROR" : ""}]`;
+      const locator = compactToolResultLocator(message);
+      if (locator) {
+        parts.push(`${label} ${locator}`);
+      } else if (text) {
+        parts.push(`${label} ${clipEvidence(text, toolEvidenceBudget(message.toolName, toolResultChars))}`);
+      }
       continue;
     }
 
     if (message.role === "custom") {
       const text = convertedMessageText(message);
-      if (text) parts.push(`[Extension message${message.customType ? `: ${message.customType}` : ""}]: ${clipEvidence(text, toolResultChars)}`);
+      if (text) {
+        // pi-subagents emits cumulative transcript snapshots through the subagent
+        // tool, but its final workflow/child handoff arrives as subagent-notify.
+        // Spend the larger budget on that compact semantic handoff, not on every
+        // overlapping transcript poll.
+        const budget = message.customType === "subagent-notify"
+          ? Math.max(toolResultChars, Math.min(12_000, toolResultChars * 6))
+          : toolResultChars;
+        parts.push(`[Extension message${message.customType ? `: ${message.customType}` : ""}]: ${clipEvidence(text, budget)}`);
+      }
       continue;
     }
 
@@ -980,10 +1021,10 @@ export function compactPreviousSummaryForPrompt(
 
   const priorities = workflowActive
     ? lane === "intent"
-      ? ["Continuation Anchor", "Remaining / Immediate Next Actions", "Adjustments / Discoveries", "Current Code / Repository State", "Done"]
+      ? ["Continuation Anchor", "User Contract Delta", "Remaining / Immediate Next Actions", "Adjustments / Discoveries", "Current Code / Repository State", "Done"]
       : ["Evidence Anchor", "Unresolved Risks / Open Questions", "Verification State", "Critical Exact Context", "Important Failures / Wrong Turns"]
     : lane === "intent"
-      ? ["Current Objective", "Accepted Plan / Scope", "Constraints / Exclusions / User Corrections"]
+      ? ["Current Objective", "User Priorities / Decision State", "Accepted Plan / Scope", "Constraints / Exclusions / User Corrections"]
       : ["Continuation Anchor", "Remaining / Immediate Next Actions", "Verification State", "Adjustments / Discoveries", "Current Code / Repository State", "Done"];
 
   const prioritized = priorities.flatMap((heading) => {

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import oneRoundCompaction from "../src/index.js";
+import oneRoundCompaction, { uniqueArtifactCandidates } from "../src/index.js";
 import { emptyUsageForTests } from "../src/core.js";
 import { loadUserArtifactManifest, storeUserArtifact } from "../src/user-artifacts.js";
 
@@ -35,6 +35,31 @@ function entry(id: string, message: ReturnType<typeof user> | ReturnType<typeof 
     message,
   };
 }
+
+test("new oversized user sources are classified before old durable references can consume the candidate budget", () => {
+  const artifact = (id: string, timestamp: number) => ({
+    id,
+    sha256: id.repeat(8),
+    timestamp,
+    chars: 9_000,
+    preview: id,
+    file: `${id}.md`,
+    sourceSessionId: "s",
+  });
+  const old1 = artifact("U0001", 1);
+  const old2 = artifact("U0002", 2);
+  const newest = artifact("U0003", 3);
+  const ordered = uniqueArtifactCandidates({
+    artifacts: [old1, old2, newest],
+    previous: [
+      { id: "U0001", sourceSessionId: "s", state: "active", misses: 0, kind: "plan", authority: "governing" },
+      { id: "U0002", sourceSessionId: "s", state: "active", misses: 0, kind: "spec", authority: "governing" },
+    ],
+    knownArtifacts: [{ id: "U0001", sourceSessionId: "s" }, { id: "U0002", sourceSessionId: "s" }],
+    recalledIds: [],
+  });
+  assert.deepEqual(ordered.map((value) => value.id), ["U0003", "U0001", "U0002"]);
+});
 
 test("extension launches exactly two LLM lanes concurrently and deterministically merges them", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-test-"));
