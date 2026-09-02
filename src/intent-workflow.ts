@@ -209,6 +209,18 @@ function parseIntentState(raw: string | undefined): IntentWorkflowStateV1 | unde
   return { version: 1, generation: value.generation, status: value.status };
 }
 
+async function resolveProjectPointer(projectWork: string, name: "current" | "pending"):
+Promise<{ dir: string; touchedAtMs: number } | undefined> {
+  const pointerPath = path.join(projectWork, name);
+  try {
+    const [dir, info] = await Promise.all([realpath(pointerPath), lstat(pointerPath)]);
+    return { dir, touchedAtMs: info.mtimeMs };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    return undefined;
+  }
+}
+
 function commandActivatesWorkstream(command: string, workstream: string): boolean {
   if (!command.includes("new-intent.sh")) return false;
   if (!/(?:--resume|--continue|--reuse|--create|--create-new)\b/.test(command)) return false;
@@ -291,17 +303,6 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
   const projectWork = path.join(workHome(), "projects", projectKey);
 
   const recordedRoot = (await readOptional(path.join(projectWork, "project-root.txt")))?.trim();
-  const currentPath = path.join(projectWork, "current");
-  let currentDir: string;
-  let currentTouchedAtMs: number;
-  try {
-    const [resolved, currentInfo] = await Promise.all([realpath(currentPath), lstat(currentPath)]);
-    currentDir = resolved;
-    currentTouchedAtMs = currentInfo.mtimeMs;
-  } catch {
-    return { active: false, reason: "no-active-ledger" };
-  }
-
   if (!recordedRoot) return { active: false, reason: "stale-project-root" };
   try {
     if ((await realpath(recordedRoot)) !== projectRoot) return { active: false, reason: "stale-project-root" };
@@ -316,46 +317,71 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
   } catch {
     return { active: false, reason: "invalid-current-target" };
   }
-  if (!currentDir.startsWith(`${realIntentsRoot}${path.sep}`)) {
+
+  const [currentPointer, pendingPointer] = await Promise.all([
+    resolveProjectPointer(projectWork, "current"),
+    resolveProjectPointer(projectWork, "pending"),
+  ]);
+  if (currentPointer && pendingPointer) return { active: false, reason: "invalid-intent-state" };
+  const pointer = currentPointer ?? pendingPointer;
+  if (!pointer) return { active: false, reason: "no-active-ledger" };
+  if (!pointer.dir.startsWith(`${realIntentsRoot}${path.sep}`)) {
     return { active: false, reason: "invalid-current-target" };
   }
 
-  const intentPath = path.join(currentDir, "intent.md");
+  const intentPath = path.join(pointer.dir, "intent.md");
   if (!(await isRegularFile(intentPath))) return { active: false, reason: "invalid-intent" };
   const [intentRaw, intentInfo, stateRaw] = await Promise.all([
     readFile(intentPath, "utf8"),
     stat(intentPath),
-    readOptional(path.join(currentDir, "state.json")),
+    readOptional(path.join(pointer.dir, "state.json")),
   ]);
   const contract = extractIntentContract(intentRaw);
   if (!contract) return { active: false, reason: "invalid-intent" };
   const workflowState = parseIntentState(stateRaw);
   if (!workflowState) return { active: false, reason: "invalid-intent-state" };
 
+  if (pendingPointer) {
+    if (workflowState.status !== "pending_reconciliation") {
+      return { active: false, reason: "invalid-intent-state" };
+    }
+    return {
+      active: false,
+      reason: "pending-reconciliation",
+      projectRoot,
+      projectKey,
+      workstream: path.basename(pointer.dir),
+      generation: workflowState.generation,
+      intentPath,
+    };
+  }
+
+  // Accept a current pointer to a pending state for compatibility with the first
+  // generation-aware script revision; it is still inactive and therefore safe.
   if (workflowState.status === "pending_reconciliation") {
     return {
       active: false,
       reason: "pending-reconciliation",
       projectRoot,
       projectKey,
-      workstream: path.basename(currentDir),
+      workstream: path.basename(pointer.dir),
       generation: workflowState.generation,
       intentPath,
     };
   }
 
-  const planPath = path.join(currentDir, "plan.md");
+  const planPath = path.join(pointer.dir, "plan.md");
   const planRaw = (await readOptional(planPath))?.trim();
   const clippedPlan = planRaw ? clip(planRaw, PLAN_MAX_CHARS) : undefined;
   const planTouchedAtMs = clippedPlan ? (await stat(planPath)).mtimeMs : 0;
-  const stateTouchedAtMs = stateRaw !== undefined ? (await stat(path.join(currentDir, "state.json"))).mtimeMs : 0;
-  const lastTouchedAtMs = Math.max(currentTouchedAtMs, intentInfo.mtimeMs, planTouchedAtMs, stateTouchedAtMs);
+  const stateTouchedAtMs = stateRaw !== undefined ? (await stat(path.join(pointer.dir, "state.json"))).mtimeMs : 0;
+  const lastTouchedAtMs = Math.max(pointer.touchedAtMs, intentInfo.mtimeMs, planTouchedAtMs, stateTouchedAtMs);
 
   return {
     active: true,
     projectRoot,
     projectKey,
-    workstream: path.basename(currentDir),
+    workstream: path.basename(pointer.dir),
     generation: workflowState.generation,
     intentPath,
     intentContract: contract.text,
