@@ -11,6 +11,7 @@ import {
   activateIntentWorkflowForSession,
   detectIntentWorkflow,
   extractIntentContract,
+  previousSummaryMatchesIntent,
 } from "../src/intent-workflow.js";
 
 const execFileAsync = promisify(execFile);
@@ -110,6 +111,7 @@ Implement strict AI review tools and Qdrant indexes.
     assert.equal(result.active, true);
     if (!result.active) return;
     assert.equal(result.workstream, "strict-tools-qdrant");
+    assert.equal(result.generation, 1);
     assert.match(result.intentContract, /Implement strict AI review tools/);
     assert.match(result.intentContract, /Do not change Review Agents UI/);
     assert.match(result.intentContract, /Verify payload indexes before alias activation/);
@@ -142,6 +144,76 @@ Implement strict AI review tools and Qdrant indexes.
       result.lastTouchedAtMs + 10_000,
     );
     assert.equal(continuedAfterPriorCompaction.active, true);
+  } finally {
+    if (previous === undefined) delete process.env.PI_WORK_HOME;
+    else process.env.PI_WORK_HOME = previous;
+  }
+});
+
+test("pending reconciliation suppresses the durable contract and previous checkpoint", async () => {
+  const repo = await makeRepo("pi-intent-pending-");
+  const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-pending-"));
+  const previous = process.env.PI_WORK_HOME;
+  process.env.PI_WORK_HOME = workHome;
+  try {
+    const projectWork = path.join(workHome, "projects", projectKey(repo));
+    const intentDir = path.join(projectWork, "intents", "issue-993-review");
+    await mkdir(intentDir, { recursive: true });
+    await writeFile(path.join(projectWork, "project-root.txt"), `${repo}\n`);
+    await symlink(path.join("intents", "issue-993-review"), path.join(projectWork, "current"));
+    await writeFile(path.join(intentDir, "intent.md"), "# Current intent\n\nOld Lite Review contract\n\n# Hard constraints\n\n- Do not alter backend persistence.\n");
+    await writeFile(path.join(intentDir, "state.json"), JSON.stringify({
+      version: 1,
+      generation: 2,
+      status: "pending_reconciliation",
+      contractSha256: "old",
+      pendingFromContractSha256: "old",
+    }));
+
+    const result = await detectIntentWorkflow(repo);
+    assert.equal(result.active, false);
+    if (result.active || result.reason !== "pending-reconciliation") return;
+    assert.equal(result.workstream, "issue-993-review");
+    assert.equal(result.generation, 2);
+    assert.equal(previousSummaryMatchesIntent(
+      "# Compaction Checkpoint\n\n## Durable Intent Workflow\nActive workstream: `issue-993-review`\nIntent generation: 1\n\n# Hard constraints\nDo not alter backend persistence.",
+      result,
+    ), false);
+  } finally {
+    if (previous === undefined) delete process.env.PI_WORK_HOME;
+    else process.env.PI_WORK_HOME = previous;
+  }
+});
+
+test("previous workflow checkpoint is reused only for the same workstream generation", async () => {
+  const repo = await makeRepo("pi-intent-generation-");
+  const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-generation-"));
+  const previous = process.env.PI_WORK_HOME;
+  process.env.PI_WORK_HOME = workHome;
+  try {
+    const projectWork = path.join(workHome, "projects", projectKey(repo));
+    const intentDir = path.join(projectWork, "intents", "issue-993-review");
+    await mkdir(intentDir, { recursive: true });
+    await writeFile(path.join(projectWork, "project-root.txt"), `${repo}\n`);
+    await symlink(path.join("intents", "issue-993-review"), path.join(projectWork, "current"));
+    await writeFile(path.join(intentDir, "intent.md"), "# Current intent\n\nHierarchical AI Review summary\n");
+    await writeFile(path.join(intentDir, "state.json"), JSON.stringify({
+      version: 1,
+      generation: 3,
+      status: "active",
+      contractSha256: "new",
+    }));
+
+    const result = await detectIntentWorkflow(repo);
+    assert.equal(result.active, true);
+    if (!result.active) return;
+    const current = "# Compaction Checkpoint\n\n## Durable Intent Workflow\nActive workstream: `issue-993-review`\nIntent generation: 3\n";
+    const oldGeneration = "# Compaction Checkpoint\n\n## Durable Intent Workflow\nActive workstream: `issue-993-review`\nIntent generation: 2\n";
+    const otherWorkstream = "# Compaction Checkpoint\n\n## Durable Intent Workflow\nActive workstream: `other`\nIntent generation: 3\n";
+    assert.equal(previousSummaryMatchesIntent(current, result), true);
+    assert.equal(previousSummaryMatchesIntent(oldGeneration, result), false);
+    assert.equal(previousSummaryMatchesIntent(otherWorkstream, result), false);
+    assert.equal(previousSummaryMatchesIntent("# Compaction Checkpoint\n\n## Execution State\nold normal task", result), false);
   } finally {
     if (previous === undefined) delete process.env.PI_WORK_HOME;
     else process.env.PI_WORK_HOME = previous;
