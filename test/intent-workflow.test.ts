@@ -150,7 +150,7 @@ Implement strict AI review tools and Qdrant indexes.
   }
 });
 
-test("pending reconciliation suppresses the durable contract and previous checkpoint", async () => {
+test("pending reconciliation is discoverable without an active current pointer", async () => {
   const repo = await makeRepo("pi-intent-pending-");
   const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-pending-"));
   const previous = process.env.PI_WORK_HOME;
@@ -160,7 +160,7 @@ test("pending reconciliation suppresses the durable contract and previous checkp
     const intentDir = path.join(projectWork, "intents", "issue-993-review");
     await mkdir(intentDir, { recursive: true });
     await writeFile(path.join(projectWork, "project-root.txt"), `${repo}\n`);
-    await symlink(path.join("intents", "issue-993-review"), path.join(projectWork, "current"));
+    await symlink(path.join("intents", "issue-993-review"), path.join(projectWork, "pending"));
     await writeFile(path.join(intentDir, "intent.md"), "# Current intent\n\nOld Lite Review contract\n\n# Hard constraints\n\n- Do not alter backend persistence.\n");
     await writeFile(path.join(intentDir, "state.json"), JSON.stringify({
       version: 1,
@@ -179,6 +179,27 @@ test("pending reconciliation suppresses the durable contract and previous checkp
       "# Compaction Checkpoint\n\n## Durable Intent Workflow\nActive workstream: `issue-993-review`\nIntent generation: 1\n\n# Hard constraints\nDo not alter backend persistence.",
       result,
     ), false);
+  } finally {
+    if (previous === undefined) delete process.env.PI_WORK_HOME;
+    else process.env.PI_WORK_HOME = previous;
+  }
+});
+
+test("simultaneous current and pending pointers fail closed", async () => {
+  const repo = await makeRepo("pi-intent-conflict-");
+  const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-conflict-"));
+  const previous = process.env.PI_WORK_HOME;
+  process.env.PI_WORK_HOME = workHome;
+  try {
+    const projectWork = path.join(workHome, "projects", projectKey(repo));
+    const intentDir = path.join(projectWork, "intents", "issue-993-review");
+    await mkdir(intentDir, { recursive: true });
+    await writeFile(path.join(projectWork, "project-root.txt"), `${repo}\n`);
+    await symlink(path.join("intents", "issue-993-review"), path.join(projectWork, "current"));
+    await symlink(path.join("intents", "issue-993-review"), path.join(projectWork, "pending"));
+    await writeFile(path.join(intentDir, "intent.md"), "# Current intent\n\nReview\n");
+    const result = await detectIntentWorkflow(repo);
+    assert.deepEqual(result, { active: false, reason: "invalid-intent-state" });
   } finally {
     if (previous === undefined) delete process.env.PI_WORK_HOME;
     else process.env.PI_WORK_HOME = previous;
