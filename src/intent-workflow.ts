@@ -40,11 +40,20 @@ const TEMPLATE_LINES = new Set([
   "- [ ] Concrete checks that prove completion.",
 ]);
 
+type IntentWorkflowStatus = "active" | "pending_reconciliation";
+
+interface IntentWorkflowStateV1 {
+  version: 1;
+  generation: number;
+  status: IntentWorkflowStatus;
+}
+
 export interface ActiveIntentWorkflow {
   active: true;
   projectRoot: string;
   projectKey: string;
   workstream: string;
+  generation: number;
   intentPath: string;
   intentContract: string;
   intentTruncated: boolean;
@@ -54,6 +63,16 @@ export interface ActiveIntentWorkflow {
   planTruncated: boolean;
 }
 
+export interface PendingIntentWorkflow {
+  active: false;
+  reason: "pending-reconciliation";
+  projectRoot: string;
+  projectKey: string;
+  workstream: string;
+  generation: number;
+  intentPath: string;
+}
+
 export interface InactiveIntentWorkflow {
   active: false;
   reason:
@@ -61,10 +80,11 @@ export interface InactiveIntentWorkflow {
     | "stale-project-root"
     | "invalid-current-target"
     | "invalid-intent"
+    | "invalid-intent-state"
     | "not-used-in-session";
 }
 
-export type IntentWorkflowDetection = ActiveIntentWorkflow | InactiveIntentWorkflow;
+export type IntentWorkflowDetection = ActiveIntentWorkflow | PendingIntentWorkflow | InactiveIntentWorkflow;
 
 function slugifyProject(value: string): string {
   return value
@@ -175,9 +195,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function parseIntentState(raw: string | undefined): IntentWorkflowStateV1 | undefined {
+  if (raw === undefined) return { version: 1, generation: 1, status: "active" };
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(value) || value.version !== 1) return undefined;
+  if (typeof value.generation !== "number" || !Number.isInteger(value.generation) || value.generation < 1) return undefined;
+  if (value.status !== "active" && value.status !== "pending_reconciliation") return undefined;
+  return { version: 1, generation: value.generation, status: value.status };
+}
+
 function commandActivatesWorkstream(command: string, workstream: string): boolean {
   if (!command.includes("new-intent.sh")) return false;
-  if (!/(?:--reuse|--create|--create-new)\b/.test(command)) return false;
+  if (!/(?:--resume|--continue|--reuse|--create|--create-new)\b/.test(command)) return false;
   return slugifyProject(command).includes(workstream);
 }
 
@@ -211,8 +245,8 @@ export function activateIntentWorkflowForSession(
 ): IntentWorkflowDetection {
   if (!detection.active) return detection;
 
-  // A create/reuse/edit performed after this extension instance loaded is direct evidence.
-  // A small tolerance avoids filesystem timestamp granularity/race issues.
+  // A create/resume/continue/confirm/edit performed after this extension instance
+  // loaded is direct evidence. A small tolerance avoids filesystem timestamp races.
   if (detection.lastTouchedAtMs >= extensionLoadedAtMs - 2_000) return detection;
 
   for (const entry of entries) {
@@ -232,6 +266,21 @@ export function activateIntentWorkflowForSession(
   // A persistent `current` symlink alone may be from a previous task. Do not let
   // that stale pointer redefine a session that is not using intent-workflow.
   return { active: false, reason: "not-used-in-session" };
+}
+
+export function previousSummaryMatchesIntent(
+  summary: string | undefined,
+  detection: IntentWorkflowDetection,
+): boolean {
+  if (!summary?.trim()) return true;
+  if (detection.active === false) {
+    if (detection.reason === "pending-reconciliation") return false;
+    return !summary.includes("## Durable Intent Workflow");
+  }
+
+  return summary.includes("## Durable Intent Workflow")
+    && summary.includes(`Active workstream: \`${detection.workstream}\``)
+    && summary.includes(`Intent generation: ${detection.generation}`);
 }
 
 export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowDetection> {
@@ -273,21 +322,41 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
 
   const intentPath = path.join(currentDir, "intent.md");
   if (!(await isRegularFile(intentPath))) return { active: false, reason: "invalid-intent" };
-  const [intentRaw, intentInfo] = await Promise.all([readFile(intentPath, "utf8"), stat(intentPath)]);
+  const [intentRaw, intentInfo, stateRaw] = await Promise.all([
+    readFile(intentPath, "utf8"),
+    stat(intentPath),
+    readOptional(path.join(currentDir, "state.json")),
+  ]);
   const contract = extractIntentContract(intentRaw);
   if (!contract) return { active: false, reason: "invalid-intent" };
+  const workflowState = parseIntentState(stateRaw);
+  if (!workflowState) return { active: false, reason: "invalid-intent-state" };
+
+  if (workflowState.status === "pending_reconciliation") {
+    return {
+      active: false,
+      reason: "pending-reconciliation",
+      projectRoot,
+      projectKey,
+      workstream: path.basename(currentDir),
+      generation: workflowState.generation,
+      intentPath,
+    };
+  }
 
   const planPath = path.join(currentDir, "plan.md");
   const planRaw = (await readOptional(planPath))?.trim();
   const clippedPlan = planRaw ? clip(planRaw, PLAN_MAX_CHARS) : undefined;
   const planTouchedAtMs = clippedPlan ? (await stat(planPath)).mtimeMs : 0;
-  const lastTouchedAtMs = Math.max(currentTouchedAtMs, intentInfo.mtimeMs, planTouchedAtMs);
+  const stateTouchedAtMs = stateRaw !== undefined ? (await stat(path.join(currentDir, "state.json"))).mtimeMs : 0;
+  const lastTouchedAtMs = Math.max(currentTouchedAtMs, intentInfo.mtimeMs, planTouchedAtMs, stateTouchedAtMs);
 
   return {
     active: true,
     projectRoot,
     projectKey,
     workstream: path.basename(currentDir),
+    generation: workflowState.generation,
     intentPath,
     intentContract: contract.text,
     intentTruncated: contract.truncated,
@@ -351,6 +420,7 @@ export function renderIntentWorkflow(
   const planChars = options.planChars ?? 8_000;
   const metadata = [
     `Active workstream: \`${snapshot.workstream}\``,
+    `Intent generation: ${snapshot.generation}`,
     `Intent: \`${snapshot.intentPath}\``,
     ...(snapshot.planPath ? [
       `Plan: \`${snapshot.planPath}\``,
