@@ -4,7 +4,7 @@ import type { CompactionResult, ExtensionAPI, ExtensionContext } from "@earendil
 import { Type } from "typebox";
 
 import { DEFAULT_CONFIG, loadConfig, resolveLaneConfig } from "./config.js";
-import { activateIntentWorkflowForSession, detectIntentWorkflow } from "./intent-workflow.js";
+import { activateIntentWorkflowForSession, detectIntentWorkflow, previousSummaryMatchesIntent } from "./intent-workflow.js";
 import { loadPromptSet } from "./prompt-loader.js";
 import {
   buildLanePrompt,
@@ -415,6 +415,9 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const boundary = prepareWholeTurnCompaction(event, effectiveRecentTokenBudget);
     const allDiscarded = boundary.messagesToSummarize;
     if (allDiscarded.length === 0) return;
+    const previousSummary = previousSummaryMatchesIntent(boundary.previousSummary, intentWorkflow)
+      ? boundary.previousSummary
+      : undefined;
 
     const fileState = collectFileState(event, allDiscarded);
     const userMessages = collectUserMessageLedger(
@@ -477,7 +480,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       lane: "intent",
       lanePrompt: intentWorkflow.active ? promptSet.workflowImplementation : promptSet.intent,
       serializedConversation: intentWorkflow.active ? executionView : serializeIntentView(allDiscarded),
-      previousSummary: boundary.previousSummary,
+      previousSummary,
       customInstructions: event.customInstructions,
       deterministic: deterministicWithoutGit,
       renderBudgets: maxRenderBudgets,
@@ -488,7 +491,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       lane: "execution",
       lanePrompt: intentWorkflow.active ? promptSet.workflowEvidence : promptSet.execution,
       serializedConversation: executionView,
-      previousSummary: boundary.previousSummary,
+      previousSummary,
       customInstructions: event.customInstructions,
       deterministic: deterministicWithoutGit,
       renderBudgets: maxRenderBudgets,
@@ -521,8 +524,10 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
 
     const started = performance.now();
     const workflowLabel = intentWorkflow.active
-      ? `intent-workflow=${intentWorkflow.workstream}`
-      : `intent-workflow=not detected (${intentWorkflow.reason})`;
+      ? `intent-workflow=${intentWorkflow.workstream} generation=${intentWorkflow.generation}`
+      : intentWorkflow.reason === "pending-reconciliation"
+        ? `intent-workflow=${intentWorkflow.workstream} generation=${intentWorkflow.generation} PENDING_RECONCILIATION`
+        : `intent-workflow=not detected (${intentWorkflow.reason})`;
     ctx.ui.notify(
       `One-round compaction: 2 parallel lanes; ${workflowLabel}; target ${config.targetPostCompactTokens.toLocaleString()} tokens; raw recent budget ${effectiveRecentTokenBudget.toLocaleString()} (Pi keepRecentTokens ${event.preparation.settings.keepRecentTokens.toLocaleString()}); retaining ~${boundary.estimatedRetainedTokens.toLocaleString()} tokens (${boundary.boundaryMode})`,
       "info",
@@ -690,8 +695,10 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `readFilesChars: ${config.readFilesChars}`,
           `preflightAutoCompact: ${config.preflightAutoCompact} (projects each idle user prompt against the active model context window)`,
           intentWorkflow.active
-            ? `intent workflow: ACTIVE workstream=${intentWorkflow.workstream} plan=${Boolean(intentWorkflow.plan)} intentTruncated=${intentWorkflow.intentTruncated} planTruncated=${intentWorkflow.planTruncated}`
-            : `intent workflow: not detected (${intentWorkflow.reason}); using normal intent+execution lanes`,
+            ? `intent workflow: ACTIVE workstream=${intentWorkflow.workstream} generation=${intentWorkflow.generation} plan=${Boolean(intentWorkflow.plan)} intentTruncated=${intentWorkflow.intentTruncated} planTruncated=${intentWorkflow.planTruncated}`
+            : intentWorkflow.reason === "pending-reconciliation"
+              ? `intent workflow: PENDING_RECONCILIATION workstream=${intentWorkflow.workstream} generation=${intentWorkflow.generation}; old durable contract/checkpoint is suppressed until --confirm`
+              : `intent workflow: not detected (${intentWorkflow.reason}); using normal intent+execution lanes`,
           intentWorkflow.active
             ? `prompts: system=${promptSet.sources.system}; implementation=${promptSet.sources.workflowImplementation}; evidence=${promptSet.sources.workflowEvidence}`
             : `prompts: system=${promptSet.sources.system}; intent=${promptSet.sources.intent}; execution=${promptSet.sources.execution}`,
