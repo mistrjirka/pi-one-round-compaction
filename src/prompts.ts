@@ -35,6 +35,9 @@ Only work completed that materially affects continuation of the current task.
 Relevant files, symbols, behaviors, and important invariants present in the supplied evidence.
 Do not reproduce large code blocks. Do not spend output on a current branch/HEAD/dirty-path inventory; fresh deterministic state is appended separately. Mention a commit only when it is semantically important to continuation.
 
+## Active Questions / Invariants
+Preserve only unresolved load-bearing questions that still control the next decision. Prefer a concrete invariant or falsifiable state transition over a broad instruction such as "review compatibility" or "check correctness". Once a question is answered, replace it with the established conclusion in Current Code / Repository State or Done instead of carrying the investigation chronology.
+
 ## Verification State
 Exact important commands/results when known. Mark PASS / FAIL / NOT RUN. Never infer PASS.
 Distinguish unrelated/pre-existing failures from failures caused by current work.
@@ -43,6 +46,9 @@ Distinguish unrelated/pre-existing failures from failures caused by current work
 Only findings that changed how the current plan should be executed or prevent repeated wasted work.
 Do not preserve failed shell commands after their lesson is captured.
 
+## Recoverable Evidence Index
+Preserve compact locators for important evidence that remains recoverable outside active context. Examples when actually present in the supplied evidence: `U####` plus `sourceSessionId`, a subagent run/session/output/transcript path, an exact log/artifact path, or distinctive `session_search` terms for an older decision/correction. Pair a locator with the conclusion or reason it may be needed. Do not copy recoverable bulk into the checkpoint and do not invent locators.
+
 ## Remaining / Immediate Next Actions
 What remains NOW, in execution order. The first item should be directly actionable.
 
@@ -50,7 +56,8 @@ Rules:
 - Current state beats chronological history.
 - Newer evidence supersedes stale state.
 - Remove resolved/stale items instead of accumulating them.
-- Preserve exact paths, symbols, error text, commands, and numeric values only when useful for continuation.
+- Preserve exact paths, symbols, error text, commands, and numeric values only when useful for continuation or retrieval.
+- Use the checkpoint as a routing/index layer: preserve established conclusions plus how to recover exact old evidence, rather than retelling large source dumps, tool outputs, child transcripts, or old conversation.
 - Do not introduce work that the user excluded.
 - Be concise.`;
 
@@ -67,6 +74,9 @@ Only implementation work actually completed toward the active durable intent.
 Relevant files, symbols, behaviors, and invariants needed to continue.
 Do not spend output on a current branch/HEAD/dirty-path inventory; fresh deterministic state is appended separately. Mention a commit only when it is semantically important to continuation.
 
+## Active Questions / Invariants
+Preserve only unresolved load-bearing questions that still control the next decision. Convert broad goals into concrete invariants or falsifiable transitions when that distinction matters. Once answered, preserve the conclusion, not the exploration chronology.
+
 ## Adjustments / Discoveries
 Only findings that materially change execution of the active intent or prevent repeated wasted work.
 
@@ -79,11 +89,12 @@ Rules:
 - Current verified state beats chronology.
 - Remove stale/resolved implementation history.
 - Do not include verification detail except when it directly determines implementation state.
+- Preserve established ownership/reachability conclusions so the main agent does not need to rediscover them after compaction.
 - Be concise.`;
 
 export const WORKFLOW_EVIDENCE_LANE_PROMPT = `An active intent-workflow ledger is supplied as deterministic evidence. It already owns task semantics. Do NOT redefine the objective or implementation plan.
 
-You own evidence and risk state only.
+You own evidence, retrieval, and risk state only.
 
 Produce exactly these headings:
 
@@ -93,17 +104,21 @@ Exact important tests, typecheck, lint, build, runtime/manual checks and their P
 ## Important Failures / Wrong Turns
 Only failures whose lesson prevents repeated wasted work. Preserve the lesson, not noisy command chronology.
 
+## Recoverable Evidence Index
+Preserve compact locators for important evidence that remains recoverable outside active context. Examples when actually present in the supplied evidence: `U####` plus `sourceSessionId`, a subagent run/session/output/transcript path, an exact log/artifact path, or distinctive `session_search` terms for an older decision/correction. State why the evidence matters. Do not summarize recoverable bulk merely to keep it in active context and do not invent locators.
+
 ## Unresolved Risks / Open Questions
-Current blockers, uncertainty, validation gaps, or questions that can materially alter completion.
+Current blockers, uncertainty, validation gaps, or questions that can materially alter completion. When useful, phrase a risk as the concrete counterexample or state transition that still needs to be falsified.
 
 ## Critical Exact Context
-Only exact errors, commands, identifiers, numeric thresholds, API/type signatures, or other details whose exact form matters for continuation.
+Only exact errors, commands, identifiers, numeric thresholds, API/type signatures, or other details whose exact form matters for continuation and cannot be safely recovered from a locator alone.
 
 Rules:
 - The durable intent/plan block is context, but newer explicit user instructions in the conversation override it.
 - Do not invent implementation tasks or broaden scope.
 - Prefer current evidence over historical evidence.
 - Distinguish unrelated/pre-existing failures from failures caused by current work.
+- Use the checkpoint as a routing/index layer: preserve conclusions plus retrievability, not large child transcripts, tool outputs, logs, or historical discussion.
 - Be concise.`;
 
 export const SPLIT_TURN_NOTE = `The compaction boundary fell inside one unusually large turn. The later suffix of that turn remains verbatim after this checkpoint. Treat the retained suffix as newer evidence if it conflicts with this checkpoint.`;
