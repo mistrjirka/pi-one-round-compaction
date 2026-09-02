@@ -11,6 +11,7 @@ import {
   activateIntentWorkflowForSession,
   detectIntentWorkflow,
   extractIntentContract,
+  shouldCarryPreviousCheckpointForIntent,
 } from "../src/intent-workflow.js";
 
 const execFileAsync = promisify(execFile);
@@ -110,6 +111,7 @@ Implement strict AI review tools and Qdrant indexes.
     assert.equal(result.active, true);
     if (!result.active) return;
     assert.equal(result.workstream, "strict-tools-qdrant");
+    assert.equal(result.generation, 1);
     assert.match(result.intentContract, /Implement strict AI review tools/);
     assert.match(result.intentContract, /Do not change Review Agents UI/);
     assert.match(result.intentContract, /Verify payload indexes before alias activation/);
@@ -142,6 +144,82 @@ Implement strict AI review tools and Qdrant indexes.
       result.lastTouchedAtMs + 10_000,
     );
     assert.equal(continuedAfterPriorCompaction.active, true);
+  } finally {
+    if (previous === undefined) delete process.env.PI_WORK_HOME;
+    else process.env.PI_WORK_HOME = previous;
+  }
+});
+
+test("pending reconciliation suppresses the old durable contract and previous checkpoint generation", async () => {
+  const repo = await makeRepo("pi-intent-pending-");
+  const workHome = await mkdtemp(path.join(os.tmpdir(), "pi-work-pending-"));
+  const previous = process.env.PI_WORK_HOME;
+  process.env.PI_WORK_HOME = workHome;
+  try {
+    const projectWork = path.join(workHome, "projects", projectKey(repo));
+    const intentDir = path.join(projectWork, "intents", "issue-993-summary");
+    await mkdir(intentDir, { recursive: true });
+    await writeFile(path.join(projectWork, "project-root.txt"), `${repo}\n`);
+    await symlink(path.join("intents", "issue-993-summary"), path.join(projectWork, "current"));
+    await writeFile(path.join(intentDir, "intent.md"), "# Current intent\n\nOld contract that must not be injected while reconciling.\n");
+    await writeFile(path.join(intentDir, "intent-state.json"), JSON.stringify({
+      schemaVersion: 1,
+      status: "pending_reconciliation",
+      generation: 2,
+    }));
+
+    const pending = await detectIntentWorkflow(repo);
+    assert.deepEqual(pending, {
+      active: false,
+      reason: "pending-reconciliation",
+      workstream: "issue-993-summary",
+      generation: 2,
+      intentPath: path.join(intentDir, "intent.md"),
+    });
+    assert.equal(shouldCarryPreviousCheckpointForIntent([], pending), false);
+
+    await writeFile(path.join(intentDir, "intent-state.json"), JSON.stringify({
+      schemaVersion: 1,
+      status: "active",
+      generation: 2,
+    }));
+    const active = await detectIntentWorkflow(repo);
+    assert.equal(active.active, true);
+    if (!active.active) return;
+    assert.equal(active.generation, 2);
+
+    const oldGenerationEntry = [{
+      type: "compaction",
+      id: "c-old",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      summary: "old generation checkpoint",
+      firstKeptEntryId: "x",
+      tokensBefore: 1,
+      details: {
+        plugin: "pi-one-round-compaction",
+        intentWorkflow: { active: true, workstream: "issue-993-summary", generation: 1 },
+      },
+    }] as never;
+    assert.equal(shouldCarryPreviousCheckpointForIntent(oldGenerationEntry, active), false);
+    const staleActivation = activateIntentWorkflowForSession(active, oldGenerationEntry, active.lastTouchedAtMs + 10_000);
+    assert.deepEqual(staleActivation, { active: false, reason: "not-used-in-session" });
+
+    const currentGenerationEntry = [{
+      type: "compaction",
+      id: "c-new",
+      parentId: null,
+      timestamp: new Date().toISOString(),
+      summary: "generation 2 checkpoint",
+      firstKeptEntryId: "x",
+      tokensBefore: 1,
+      details: {
+        plugin: "pi-one-round-compaction",
+        intentWorkflow: { active: true, workstream: "issue-993-summary", generation: 2 },
+      },
+    }] as never;
+    assert.equal(shouldCarryPreviousCheckpointForIntent(currentGenerationEntry, active), true);
+    assert.equal(activateIntentWorkflowForSession(active, currentGenerationEntry, active.lastTouchedAtMs + 10_000).active, true);
   } finally {
     if (previous === undefined) delete process.env.PI_WORK_HOME;
     else process.env.PI_WORK_HOME = previous;

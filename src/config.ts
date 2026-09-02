@@ -61,7 +61,7 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   preflightAutoCompact: true,
   fallbackToNative: false,
   lanes: {
-    intent: { maxOutputTokens: 3072 },
+    intent: { thinkingLevel: "medium", maxOutputTokens: 3072 },
     execution: {},
   },
 };

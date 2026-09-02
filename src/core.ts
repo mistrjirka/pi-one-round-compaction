@@ -69,6 +69,12 @@ export interface DeterministicRenderBudgets {
   userArtifactReferencesChars: number;
 }
 
+export interface PendingIntentReconciliation {
+  workstream: string;
+  generation: number;
+  intentPath: string;
+}
+
 export interface DeterministicState {
   git?: GitState;
   /** Cumulative Pi-compatible file metadata retained in details for recovery/diagnostics. */
@@ -88,6 +94,8 @@ export interface DeterministicState {
   /** Legacy/display IDs retained for backward compatibility and diagnostics. */
   knownUserArtifactIds?: string[];
   intentWorkflow?: ActiveIntentWorkflow;
+  /** Recognized workstream whose old contract/checkpoint is intentionally suspended. */
+  pendingIntentReconciliation?: PendingIntentReconciliation;
 }
 
 export interface OneRoundDetails {
@@ -123,6 +131,7 @@ export interface OneRoundDetails {
   intentWorkflow: {
     active: boolean;
     workstream?: string;
+    generation?: number;
     hasPlan?: boolean;
     intentTruncated?: boolean;
     planTruncated?: boolean;
@@ -157,6 +166,15 @@ function clip(text: string, maxChars: number): string {
   if (maxChars <= 0) return "";
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars)}\n[… ${text.length - maxChars} chars omitted]`;
+}
+
+function clipEvidence(text: string, maxChars: number): string {
+  if (maxChars <= 0) return "";
+  if (text.length <= maxChars) return text;
+  const marker = `\n[… ${text.length - maxChars} chars omitted from middle …]\n`;
+  const head = Math.ceil(maxChars * 0.6);
+  const tail = Math.max(0, maxChars - head);
+  return `${text.slice(0, head)}${marker}${tail > 0 ? text.slice(-tail) : ""}`;
 }
 
 function serializeToolCallArguments(value: unknown, maxChars = 3000): string {
@@ -245,25 +263,25 @@ export function serializeExecutionView(
 
     if (message.role === "toolResult") {
       const text = contentText(message.content, "").trim();
-      if (text) parts.push(`[Tool result]: ${clip(text, toolResultChars)}`);
+      if (text) parts.push(`[Tool result]: ${clipEvidence(text, toolResultChars)}`);
       continue;
     }
 
     if (message.role === "custom") {
       const text = convertedMessageText(message);
-      if (text) parts.push(`[Extension message${message.customType ? `: ${message.customType}` : ""}]: ${clip(text, toolResultChars)}`);
+      if (text) parts.push(`[Extension message${message.customType ? `: ${message.customType}` : ""}]: ${clipEvidence(text, toolResultChars)}`);
       continue;
     }
 
     if (message.role === "bashExecution") {
       const text = convertedMessageText(message);
-      if (text) parts.push(`[Bash execution]: ${clip(text, toolResultChars)}`);
+      if (text) parts.push(`[Bash execution]: ${clipEvidence(text, toolResultChars)}`);
       continue;
     }
 
     if (message.role === "branchSummary" || message.role === "compactionSummary") {
       const text = convertedMessageText(message);
-      if (text) parts.push(`[Prior summary evidence]: ${clip(text, Math.max(toolResultChars, 3500))}`);
+      if (text) parts.push(`[Prior summary evidence]: ${clipEvidence(text, Math.max(toolResultChars, 3500))}`);
     }
   }
 
@@ -869,6 +887,20 @@ function renderDeterministicState(
   budgets: DeterministicRenderBudgets,
 ): string {
   const sections: string[] = [];
+  if (state.pendingIntentReconciliation && budgets.intentWorkflowChars > 0) {
+    const pending = state.pendingIntentReconciliation;
+    sections.push(clip(
+      [
+        "### Intent reconciliation required",
+        `Workstream: \`${pending.workstream}\``,
+        `Generation: ${pending.generation}`,
+        `Intent: \`${pending.intentPath}\``,
+        "Status: PENDING_RECONCILIATION",
+        "The previous durable intent contract and previous-generation checkpoint were intentionally suppressed. Before implementation governed by this workstream, update the current intent contract from the newest explicit user request and complete the intent-workflow confirmation. Do not reconstruct the old contract from memory.",
+      ].join("\n"),
+      budgets.intentWorkflowChars,
+    ));
+  }
   if (state.git) {
     const git = renderGitState(state.git, budgets.gitStateChars);
     if (git) sections.push(git);
@@ -932,7 +964,38 @@ export function compactPreviousSummaryForPrompt(
     const index = source.indexOf(marker, start + startMarker.length);
     if (index >= 0) end = Math.min(end, index);
   }
-  return clip(source.slice(start, end).trim(), maxChars);
+
+  const laneSource = source.slice(start + startMarker.length, end).trim();
+  const headingMatches = [...laneSource.matchAll(/^## ([^\n]+)\s*$/gm)];
+  if (headingMatches.length === 0) return clip(source.slice(start, end).trim(), maxChars);
+
+  const sections = new Map<string, string>();
+  for (let i = 0; i < headingMatches.length; i++) {
+    const match = headingMatches[i]!;
+    const heading = match[1]!.trim();
+    const sectionStart = match.index ?? 0;
+    const sectionEnd = i + 1 < headingMatches.length ? headingMatches[i + 1]!.index! : laneSource.length;
+    sections.set(heading, laneSource.slice(sectionStart, sectionEnd).trim());
+  }
+
+  const priorities = workflowActive
+    ? lane === "intent"
+      ? ["Continuation Anchor", "Remaining / Immediate Next Actions", "Adjustments / Discoveries", "Current Code / Repository State", "Done"]
+      : ["Evidence Anchor", "Unresolved Risks / Open Questions", "Verification State", "Critical Exact Context", "Important Failures / Wrong Turns"]
+    : lane === "intent"
+      ? ["Current Objective", "Accepted Plan / Scope", "Constraints / Exclusions / User Corrections"]
+      : ["Continuation Anchor", "Remaining / Immediate Next Actions", "Verification State", "Adjustments / Discoveries", "Current Code / Repository State", "Done"];
+
+  const prioritized = priorities.flatMap((heading) => {
+    const section = sections.get(heading);
+    return section ? [section] : [];
+  });
+  if (prioritized.length === 0) return clip(source.slice(start, end).trim(), maxChars);
+
+  // Carry the lane in continuation priority rather than source order. In particular,
+  // a long Done/Current-State section must never push the unresolved next action off
+  // the 12k previous-checkpoint budget on a later compaction.
+  return clip(prioritized.join("\n\n"), maxChars);
 }
 
 export function buildLanePrompt(input: PromptBuildInput): string {
@@ -975,6 +1038,42 @@ export function buildLanePrompt(input: PromptBuildInput): string {
   if (input.isSplitTurn) sections.push(`## Boundary note\n${SPLIT_TURN_NOTE}`);
   sections.push(`## Older conversation being compacted\n\n<conversation>\n${input.serializedConversation}\n</conversation>`);
   return sections.join("\n\n");
+}
+
+function h2Section(text: string, heading: string): string | undefined {
+  const pattern = new RegExp(`^## ${heading.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\s*$`, "m");
+  const match = pattern.exec(text);
+  if (!match || match.index === undefined) return undefined;
+  const bodyStart = match.index + match[0].length;
+  const next = /^## [^\n]+\s*$/m.exec(text.slice(bodyStart));
+  const bodyEnd = next?.index !== undefined ? bodyStart + next.index : text.length;
+  return text.slice(bodyStart, bodyEnd).trim();
+}
+
+export type ContinuationLaneRole = "intent" | "execution" | "implementation" | "evidence";
+
+/**
+ * The LLM is instructed to emit a compact continuation/evidence anchor. Keep the
+ * one-round topology robust when a cheap summarizer misses that heading: derive
+ * the anchor deterministically from its own remaining/risk section rather than
+ * silently publishing a checkpoint with no explicit resume point.
+ */
+export function protectLaneAnchor(result: LaneResult, role: ContinuationLaneRole): LaneResult {
+  const requiredHeading = role === "evidence"
+    ? "Evidence Anchor"
+    : role === "execution" || role === "implementation"
+      ? "Continuation Anchor"
+      : undefined;
+  if (!requiredHeading || new RegExp(`^## ${requiredHeading}\\s*$`, "m").test(result.text)) return result;
+
+  const source = role === "evidence"
+    ? h2Section(result.text, "Unresolved Risks / Open Questions") ?? h2Section(result.text, "Verification State")
+    : h2Section(result.text, "Remaining / Immediate Next Actions");
+  const body = source?.trim()
+    || (/\bCOMPLETE\b/i.test(result.text)
+      ? "COMPLETE"
+      : "UNKNOWN — the summarizer omitted the required continuation state. Re-check retained recent context and the current user/intent contract before taking a new action.");
+  return { ...result, text: `## ${requiredHeading}\n${body}\n\n${result.text.trim()}` };
 }
 
 export function parseModelReference(reference: string): { provider: string; modelId: string } | undefined {
@@ -1197,7 +1296,7 @@ export function deterministicMerge(params: {
 
 function budgetFloors(state: DeterministicState, max: DeterministicRenderBudgets): DeterministicRenderBudgets {
   return {
-    intentWorkflowChars: state.intentWorkflow ? Math.min(max.intentWorkflowChars, 2_400) : 0,
+    intentWorkflowChars: (state.intentWorkflow || state.pendingIntentReconciliation) ? Math.min(max.intentWorkflowChars, 2_400) : 0,
     gitStateChars: state.git ? Math.min(max.gitStateChars, 800) : 0,
     editedFilesChars: state.traceEditedFiles.length > 0 ? Math.min(max.editedFilesChars, 1_200) : 0,
     readFilesChars: state.traceReadFiles.length > 0 ? Math.min(max.readFilesChars, 240) : 0,
@@ -1351,6 +1450,7 @@ export function makeOneRoundDetails(params: {
       ? {
           active: true,
           workstream: params.deterministic.intentWorkflow.workstream,
+          generation: params.deterministic.intentWorkflow.generation,
           hasPlan: Boolean(params.deterministic.intentWorkflow.plan),
           intentTruncated: params.deterministic.intentWorkflow.intentTruncated,
           planTruncated: params.deterministic.intentWorkflow.planTruncated,

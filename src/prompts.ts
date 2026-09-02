@@ -28,6 +28,9 @@ export const EXECUTION_LANE_PROMPT = `You own ONLY execution state. Do not redef
 
 Produce exactly these headings:
 
+## Continuation Anchor
+Protect the minimum state needed to resume correctly after this checkpoint. State the current phase, the single immediate next action, any active delegated run or external wait by exact identifier when known, current blockers/required decisions, and concise do-not-redo facts. If nothing remains, say COMPLETE. Keep this section short and operational.
+
 ## Done
 Only work completed that materially affects continuation of the current task.
 
@@ -44,9 +47,10 @@ Only findings that changed how the current plan should be executed or prevent re
 Do not preserve failed shell commands after their lesson is captured.
 
 ## Remaining / Immediate Next Actions
-What remains NOW, in execution order. The first item should be directly actionable.
+What remains NOW, in execution order. The first item should be directly actionable and agree with the Continuation Anchor.
 
 Rules:
+- The Continuation Anchor is the highest-priority continuation output. Preserve an unresolved prior next action, active delegated run, blocker, or required validation until newer evidence explicitly completes, cancels, or supersedes it. Never drop it merely because older implementation history is long.
 - Current state beats chronological history.
 - Newer evidence supersedes stale state.
 - Remove resolved/stale items instead of accumulating them.
@@ -60,6 +64,9 @@ You own implementation continuation state only.
 
 Produce exactly these headings:
 
+## Continuation Anchor
+Protect the minimum state needed to resume the active workstream correctly. State the current phase, the single immediate next action, any active delegated run or external wait by exact identifier when known, current blockers/required decisions, and concise do-not-redo facts. If implementation is complete, say COMPLETE and name any remaining verification/review handoff. Keep this section short and operational.
+
 ## Done
 Only implementation work actually completed toward the active durable intent.
 
@@ -71,9 +78,10 @@ Do not spend output on a current branch/HEAD/dirty-path inventory; fresh determi
 Only findings that materially change execution of the active intent or prevent repeated wasted work.
 
 ## Remaining / Immediate Next Actions
-What remains NOW. The first item must be directly actionable.
+What remains NOW. The first item must be directly actionable and agree with the Continuation Anchor.
 
 Rules:
+- The Continuation Anchor is the highest-priority continuation output. Preserve an unresolved prior next action, active delegated run, blocker, or required validation until newer evidence explicitly completes, cancels, or supersedes it. Never drop it merely because older implementation history is long.
 - The durable intent/plan block is context, but newer explicit user instructions in the conversation override it.
 - Never broaden scope beyond the durable intent or newer explicit user instructions.
 - Current verified state beats chronology.
@@ -86,6 +94,9 @@ export const WORKFLOW_EVIDENCE_LANE_PROMPT = `An active intent-workflow ledger i
 You own evidence and risk state only.
 
 Produce exactly these headings:
+
+## Evidence Anchor
+Protect unresolved evidence that can change what happens next: required checks still NOT RUN or FAIL, blocking uncertainty, and the smallest focused verification needed next. If evidence is complete, say COMPLETE. Keep this section short.
 
 ## Verification State
 Exact important tests, typecheck, lint, build, runtime/manual checks and their PASS / FAIL / NOT RUN state. Never infer PASS.
@@ -100,6 +111,7 @@ Current blockers, uncertainty, validation gaps, or questions that can materially
 Only exact errors, commands, identifiers, numeric thresholds, API/type signatures, or other details whose exact form matters for continuation.
 
 Rules:
+- The Evidence Anchor has priority over historical verification chronology. Preserve unresolved required checks and blockers until newer evidence explicitly resolves them.
 - The durable intent/plan block is context, but newer explicit user instructions in the conversation override it.
 - Do not invent implementation tasks or broaden scope.
 - Prefer current evidence over historical evidence.

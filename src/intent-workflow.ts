@@ -45,6 +45,8 @@ export interface ActiveIntentWorkflow {
   projectRoot: string;
   projectKey: string;
   workstream: string;
+  /** Monotonic contract generation. Legacy ledgers without state metadata are generation 1. */
+  generation: number;
   intentPath: string;
   intentContract: string;
   intentTruncated: boolean;
@@ -61,7 +63,13 @@ export interface InactiveIntentWorkflow {
     | "stale-project-root"
     | "invalid-current-target"
     | "invalid-intent"
+    | "invalid-intent-state"
+    | "pending-reconciliation"
     | "not-used-in-session";
+  /** Present for a recognized workstream whose old contract is intentionally suspended. */
+  workstream?: string;
+  generation?: number;
+  intentPath?: string;
 }
 
 export type IntentWorkflowDetection = ActiveIntentWorkflow | InactiveIntentWorkflow;
@@ -163,6 +171,28 @@ async function readOptional(filePath: string): Promise<string | undefined> {
   }
 }
 
+interface IntentStateFile {
+  status: "active" | "pending_reconciliation";
+  generation: number;
+}
+
+async function readIntentState(currentDir: string): Promise<IntentStateFile | undefined | null> {
+  const raw = await readOptional(path.join(currentDir, "intent-state.json"));
+  if (raw === undefined) return undefined;
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!isRecord(value)) return null;
+    const status = value.status;
+    const generation = value.generation;
+    if ((status !== "active" && status !== "pending_reconciliation") || !Number.isInteger(generation) || Number(generation) < 1) {
+      return null;
+    }
+    return { status, generation: Number(generation) };
+  } catch {
+    return null;
+  }
+}
+
 async function isRegularFile(filePath: string): Promise<boolean> {
   try {
     return (await stat(filePath)).isFile();
@@ -177,7 +207,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function commandActivatesWorkstream(command: string, workstream: string): boolean {
   if (!command.includes("new-intent.sh")) return false;
-  if (!/(?:--reuse|--create|--create-new)\b/.test(command)) return false;
+  if (!/(?:--resume|--continue|--confirm|--reuse|--create|--create-new)\b/.test(command)) return false;
   return slugifyProject(command).includes(workstream);
 }
 
@@ -222,6 +252,10 @@ export function activateIntentWorkflowForSession(
         isRecord(workflow)
         && workflow.active === true
         && workflow.workstream === detection.workstream
+        && (
+          workflow.generation === detection.generation
+          || (workflow.generation === undefined && detection.generation === 1)
+        )
       ) {
         return detection;
       }
@@ -273,6 +307,20 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
 
   const intentPath = path.join(currentDir, "intent.md");
   if (!(await isRegularFile(intentPath))) return { active: false, reason: "invalid-intent" };
+
+  const intentState = await readIntentState(currentDir);
+  if (intentState === null) return { active: false, reason: "invalid-intent-state" };
+  const generation = intentState?.generation ?? 1;
+  if (intentState?.status === "pending_reconciliation") {
+    return {
+      active: false,
+      reason: "pending-reconciliation",
+      workstream: path.basename(currentDir),
+      generation,
+      intentPath,
+    };
+  }
+
   const [intentRaw, intentInfo] = await Promise.all([readFile(intentPath, "utf8"), stat(intentPath)]);
   const contract = extractIntentContract(intentRaw);
   if (!contract) return { active: false, reason: "invalid-intent" };
@@ -288,6 +336,7 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
     projectRoot,
     projectKey,
     workstream: path.basename(currentDir),
+    generation,
     intentPath,
     intentContract: contract.text,
     intentTruncated: contract.truncated,
@@ -295,6 +344,24 @@ export async function detectIntentWorkflow(cwd: string): Promise<IntentWorkflowD
     ...(clippedPlan ? { planPath, plan: clippedPlan.text } : {}),
     planTruncated: clippedPlan?.truncated ?? false,
   };
+}
+
+export function shouldCarryPreviousCheckpointForIntent(
+  entries: SessionEntry[],
+  detection: IntentWorkflowDetection,
+): boolean {
+  if (!detection.active) return detection.reason !== "pending-reconciliation";
+
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
+    if (entry.type !== "compaction" || !isRecord(entry.details)) continue;
+    const workflow = entry.details.intentWorkflow;
+    if (!isRecord(workflow) || workflow.active !== true) return false;
+    if (workflow.workstream !== detection.workstream) return false;
+    return workflow.generation === detection.generation
+      || (workflow.generation === undefined && detection.generation === 1);
+  }
+  return true;
 }
 
 export interface IntentWorkflowRenderOptions {
@@ -351,6 +418,7 @@ export function renderIntentWorkflow(
   const planChars = options.planChars ?? 8_000;
   const metadata = [
     `Active workstream: \`${snapshot.workstream}\``,
+    `Intent generation: ${snapshot.generation}`,
     `Intent: \`${snapshot.intentPath}\``,
     ...(snapshot.planPath ? [
       `Plan: \`${snapshot.planPath}\``,
