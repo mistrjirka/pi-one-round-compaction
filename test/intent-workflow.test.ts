@@ -133,7 +133,7 @@ Implement strict AI review tools and Qdrant indexes.
         id: "c1",
         parentId: null,
         timestamp: new Date().toISOString(),
-        summary: "prior",
+        summary: "prior generation-1 checkpoint without an explicit generation marker",
         firstKeptEntryId: "x",
         tokensBefore: 1,
         details: {
@@ -235,6 +235,38 @@ test("previous workflow checkpoint is reused only for the same workstream genera
     assert.equal(previousSummaryMatchesIntent(oldGeneration, result), false);
     assert.equal(previousSummaryMatchesIntent(otherWorkstream, result), false);
     assert.equal(previousSummaryMatchesIntent("# Compaction Checkpoint\n\n## Execution State\nold normal task", result), false);
+
+    const oldSessionBinding = activateIntentWorkflowForSession(
+      result,
+      [{
+        type: "compaction",
+        id: "old-generation",
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        summary: oldGeneration,
+        firstKeptEntryId: "x",
+        tokensBefore: 1,
+        details: { intentWorkflow: { active: true, workstream: "issue-993-review" } },
+      }] as never,
+      result.lastTouchedAtMs + 10_000,
+    );
+    assert.deepEqual(oldSessionBinding, { active: false, reason: "not-used-in-session" });
+
+    const currentSessionBinding = activateIntentWorkflowForSession(
+      result,
+      [{
+        type: "compaction",
+        id: "current-generation",
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        summary: current,
+        firstKeptEntryId: "x",
+        tokensBefore: 1,
+        details: { intentWorkflow: { active: true, workstream: "issue-993-review" } },
+      }] as never,
+      result.lastTouchedAtMs + 10_000,
+    );
+    assert.equal(currentSessionBinding.active, true);
   } finally {
     if (previous === undefined) delete process.env.PI_WORK_HOME;
     else process.env.PI_WORK_HOME = previous;
