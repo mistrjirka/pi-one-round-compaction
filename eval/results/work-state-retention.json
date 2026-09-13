@@ -1,0 +1,67 @@
+{
+  "method": "Assistant manual semantic assessment of the FULL merged checkpoint, including its deterministic user ledger. Not a blinded independent judge, not continuation-model accuracy, not a new model run. Contradictions fail even when the correct fact appears elsewhere.",
+  "goldCases": 2,
+  "goldChecks": 16,
+  "sourceHashes": {
+    "cron-final": {
+      "sourceSha256": "047fc047c17c80fd804ce28727557eef24d06c4a0f176305933716274c8c3b05",
+      "normalizedSha256": "ec4b0aa4d6f8a4d1a71dd3c734305fa1b4c635ab64104fc4be1669dcbc2f9b9a"
+    },
+    "review-final": {
+      "sourceSha256": "436fa6c80b919ee47fce2dc934de5396e478e857598b0fbf7ce67de27e0ab65e",
+      "normalizedSha256": "8b1e42bc8f655f0ef33d77d8927aeccd0c6ff6ad636f9d496ad5ac0a294e1d73"
+    }
+  },
+  "rows": [
+    {
+      "variant": "baseline",
+      "case": "cron-final",
+      "checkpointSha256": "9bf9bd6c29570f6fdca941a339a12ab6a5398f27d2659b5add3884b4af1fc5e1",
+      "labels": {
+        "goal": "preserved",
+        "scope": "preserved",
+        "edits": "contradicted",
+        "build": "preserved",
+        "runtime": "contradicted",
+        "next": "contradicted",
+        "evidence": "unsupported",
+        "mode": "contradicted"
+      },
+      "counts": {
+        "preserved": 3,
+        "contradicted": 4,
+        "unsupported": 1
+      }
+    },
+    {
+      "variant": "refresh",
+      "case": "cron-final",
+      "checkpointSha256": "63054022d33767557e2e993a2d4ef986135f293fd0fb3523bb8914bbe20f978e",
+      "labels": {
+        "goal": "preserved",
+        "scope": "preserved",
+        "edits": "preserved",
+        "build": "preserved",
+        "runtime": "contradicted",
+        "next": "contradicted",
+        "evidence": "unsupported",
+        "mode": "preserved"
+      },
+      "counts": {
+        "preserved": 5,
+        "contradicted": 2,
+        "unsupported": 1
+      }
+    }
+  ],
+  "unscoredCases": [
+    "review-final"
+  ],
+  "limitations": [
+    "Development set already examined while diagnosing failures; not blind holdout.",
+    "Two final candidates from one session, following three synthetic compaction rounds.",
+    "These archived candidates predate the duplicate-heading guard and are now rejected.",
+    "Review-session gold is prepared; no valid full review checkpoint was available.",
+    "No new model inference, training, or downstream coding execution in this audit."
+  ]
+}

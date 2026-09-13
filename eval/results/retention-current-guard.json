@@ -1,0 +1,22 @@
+[
+  {
+    "variant": "baseline",
+    "rejected": true,
+    "failures": [
+      {
+        "lane": "execution",
+        "error": "execution lane returned a duplicate checkpoint section: Continuation Anchor"
+      }
+    ]
+  },
+  {
+    "variant": "cron-refresh",
+    "rejected": true,
+    "failures": [
+      {
+        "lane": "intent",
+        "error": "intent lane returned a duplicate checkpoint section: Current Objective"
+      }
+    ]
+  }
+]

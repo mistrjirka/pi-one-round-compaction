@@ -54,3 +54,7 @@ Research informing next experiments:
 - [Effective context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents): prioritize recall and persistent notes before aggressively shrinking context.
 
 Next: keep an exact lightweight plan/checklist outside repeated summaries without restoring the intent confirmation workflow; compare masked traces against current compaction on fixed continuation questions; test native Pi sessions and an upstream server control before attributing errors to prompts, model or backend. Track unrun checks and corrections separately from implementation completion. Require source identifiers for claimed evidence and test repeated compaction, not just one summary.
+
+## Goal and progress retention audit
+
+See [retention-evaluation.md](retention-evaluation.md) for public dataset candidates, sixteen source-linked assertions, manual scoring of two archived final checkpoints, and the question-answer routing audit. No additional model runs or production changes were made in that pass.

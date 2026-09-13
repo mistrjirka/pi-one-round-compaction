@@ -1,0 +1,43 @@
+{
+  "source": "opencode/ses_308d8f938ffeDJXvOoECX8ECtZ.json",
+  "sourceSha256": "436fa6c80b919ee47fce2dc934de5396e478e857598b0fbf7ce67de27e0ab65e",
+  "rows": [
+    {
+      "index": 51,
+      "tool": "question",
+      "sourceChars": 307,
+      "isolatedIntentChars": 0,
+      "isolatedExecutionChars": 331,
+      "includedByReplayUserLedger": false,
+      "exactAnswerPresentInIntentPrefix": false
+    },
+    {
+      "index": 69,
+      "tool": "question",
+      "sourceChars": 176,
+      "isolatedIntentChars": 0,
+      "isolatedExecutionChars": 200,
+      "includedByReplayUserLedger": false,
+      "exactAnswerPresentInIntentPrefix": false
+    },
+    {
+      "index": 71,
+      "tool": "question",
+      "sourceChars": 163,
+      "isolatedIntentChars": 0,
+      "isolatedExecutionChars": 187,
+      "includedByReplayUserLedger": false,
+      "exactAnswerPresentInIntentPrefix": false
+    },
+    {
+      "index": 88,
+      "tool": "question",
+      "sourceChars": 276,
+      "isolatedIntentChars": 0,
+      "isolatedExecutionChars": 300,
+      "includedByReplayUserLedger": false,
+      "exactAnswerPresentInIntentPrefix": false
+    }
+  ],
+  "caveat": "This audits the archived OpenCode-to-Pi replay. Direct answers in question tool results reach the execution view but not the intent view or user-only replay ledger. Later assistant paraphrases can preserve some meaning; this is not proof all information was lost, nor a verified bug in the user's native Pi question adapter."
+}
