@@ -1,0 +1,7 @@
+{
+  "gguf_chars": 7764,
+  "upstream_chars": 7536,
+  "same_stripped": false,
+  "gguf_sha256": "e84f32a23fdda27689f868aa4a1a5621f41133e51a48d7f3efcbea2839574259",
+  "upstream_sha256": "182e77dd83bd8e9ca818b240b82e28f243762cd5dda32e6eef327df7b1cd107e"
+}

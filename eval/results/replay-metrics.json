@@ -1,0 +1,115 @@
+{
+  "source": "opencode/ses_31d7bcf4cffe7fjGfy8LC6UJqU.json",
+  "sha256": "047fc047c17c80fd804ce28727557eef24d06c4a0f176305933716274c8c3b05",
+  "model": "/models/Ornith-1.5-35B-A3B/Ornith-1.5-35B-A3B-AD-Q6_K-Q5_K.gguf",
+  "reasoning": "off",
+  "mtp": false,
+  "seed": 42,
+  "records": [
+    {
+      "name": "before-approval",
+      "start": 0,
+      "end": 143,
+      "wallMs": 68087.779864,
+      "summaryChars": 13767,
+      "lanes": [
+        {
+          "inputChars": 60266,
+          "usage": {
+            "completion_tokens": 869,
+            "prompt_tokens": 15801,
+            "total_tokens": 16670,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 60605.542634,
+          "finishReason": "stop"
+        },
+        {
+          "inputChars": 185988,
+          "usage": {
+            "completion_tokens": 1401,
+            "prompt_tokens": 54672,
+            "total_tokens": 56073,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 68071.208246,
+          "finishReason": "stop"
+        }
+      ]
+    },
+    {
+      "name": "after-approval",
+      "start": 143,
+      "end": 144,
+      "wallMs": 24082.173318,
+      "summaryChars": 17157,
+      "lanes": [
+        {
+          "inputChars": 8325,
+          "usage": {
+            "completion_tokens": 1633,
+            "prompt_tokens": 2148,
+            "total_tokens": 3781,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 24081.294685,
+          "finishReason": "stop"
+        },
+        {
+          "inputChars": 12248,
+          "usage": {
+            "completion_tokens": 1437,
+            "prompt_tokens": 3111,
+            "total_tokens": 4548,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 22019.206674999994,
+          "finishReason": "stop"
+        }
+      ]
+    },
+    {
+      "name": "after-implementation",
+      "start": 144,
+      "end": 151,
+      "wallMs": 28375.714406999992,
+      "summaryChars": 15440,
+      "lanes": [
+        {
+          "inputChars": 9091,
+          "usage": {
+            "completion_tokens": 561,
+            "prompt_tokens": 2328,
+            "total_tokens": 2889,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 10461.689207999996,
+          "finishReason": "stop"
+        },
+        {
+          "inputChars": 13562,
+          "usage": {
+            "completion_tokens": 2244,
+            "prompt_tokens": 3519,
+            "total_tokens": 5763,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 28372.149974,
+          "finishReason": "stop"
+        }
+      ]
+    }
+  ]
+}

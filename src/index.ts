@@ -551,6 +551,9 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       "info",
     );
 
+    // A failed compaction must not leave its sibling consuming a model slot.
+    const laneAbort = new AbortController();
+    const laneSignal = AbortSignal.any([event.signal, laneAbort.signal]);
     const runTrackedLane = async (lane: LaneName, prompt: string) => {
       progress.laneStart(lane);
       try {
@@ -560,12 +563,15 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           prompt,
           systemPrompt: promptSet.system,
           ctx,
-          signal: event.signal,
-          onTextDelta: (delta) => progress.laneDelta(lane, delta),
+          signal: laneSignal,
+          onTextDelta: (delta) => {
+            if (!laneSignal.aborted) progress.laneDelta(lane, delta);
+          },
         });
         progress.laneDone(lane, result.text);
         return result;
       } catch (error) {
+        laneAbort.abort(error);
         progress.laneError(lane, formatError(error));
         throw error;
       }

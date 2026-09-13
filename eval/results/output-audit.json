@@ -1,0 +1,345 @@
+[
+  {
+    "directory": "baseline",
+    "checkpoint": "after-approval.json",
+    "lane": "intent",
+    "chars": 6946,
+    "rejected": "intent lane returned a duplicate checkpoint section: Current Objective",
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 8325,
+      "usage": {
+        "completion_tokens": 1633,
+        "prompt_tokens": 2148,
+        "total_tokens": 3781,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 24081.294685,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "baseline",
+    "checkpoint": "after-approval.json",
+    "lane": "execution",
+    "chars": 5573,
+    "rejected": "execution lane returned a duplicate checkpoint section: Continuation Anchor",
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 12248,
+      "usage": {
+        "completion_tokens": 1437,
+        "prompt_tokens": 3111,
+        "total_tokens": 4548,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 22019.206674999994,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "baseline",
+    "checkpoint": "after-implementation.json",
+    "lane": "intent",
+    "chars": 2351,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 9091,
+      "usage": {
+        "completion_tokens": 561,
+        "prompt_tokens": 2328,
+        "total_tokens": 2889,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 10461.689207999996,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "baseline",
+    "checkpoint": "after-implementation.json",
+    "lane": "execution",
+    "chars": 8451,
+    "rejected": "execution lane returned a duplicate checkpoint section: Continuation Anchor",
+    "introducedKnownUnsupportedEvidence": [
+      "671624a",
+      "retry.model-not-loaded",
+      "100% coverage"
+    ],
+    "metrics": {
+      "inputChars": 13562,
+      "usage": {
+        "completion_tokens": 2244,
+        "prompt_tokens": 3519,
+        "total_tokens": 5763,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 28372.149974,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "baseline",
+    "checkpoint": "before-approval.json",
+    "lane": "intent",
+    "chars": 3505,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 60266,
+      "usage": {
+        "completion_tokens": 869,
+        "prompt_tokens": 15801,
+        "total_tokens": 16670,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 60605.542634,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "baseline",
+    "checkpoint": "before-approval.json",
+    "lane": "execution",
+    "chars": 5675,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 185988,
+      "usage": {
+        "completion_tokens": 1401,
+        "prompt_tokens": 54672,
+        "total_tokens": 56073,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 68071.208246,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-refresh",
+    "checkpoint": "after-approval.json",
+    "lane": "intent",
+    "chars": 2661,
+    "rejected": "intent lane returned a duplicate checkpoint section: Current Objective",
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 8934,
+      "usage": {
+        "completion_tokens": 582,
+        "prompt_tokens": 2232,
+        "total_tokens": 2814,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 10750.294347000003,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-refresh",
+    "checkpoint": "after-approval.json",
+    "lane": "execution",
+    "chars": 12362,
+    "rejected": "execution lane returned a duplicate checkpoint section: Continuation Anchor",
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 13558,
+      "usage": {
+        "completion_tokens": 3169,
+        "prompt_tokens": 3438,
+        "total_tokens": 6607,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 38372.45964500001,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-refresh",
+    "checkpoint": "after-implementation.json",
+    "lane": "intent",
+    "chars": 2367,
+    "rejected": "intent lane returned a duplicate checkpoint section: Current Objective",
+    "introducedKnownUnsupportedEvidence": [
+      "All 14284 declarations",
+      "vite v7.2.4 built in 19.17s"
+    ],
+    "metrics": {
+      "inputChars": 8534,
+      "usage": {
+        "completion_tokens": 598,
+        "prompt_tokens": 2144,
+        "total_tokens": 2742,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 11122.117524000001,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-refresh",
+    "checkpoint": "after-implementation.json",
+    "lane": "execution",
+    "chars": 4746,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 15968,
+      "usage": {
+        "completion_tokens": 1235,
+        "prompt_tokens": 4073,
+        "total_tokens": 5308,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 17938.878698,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-refresh",
+    "checkpoint": "before-approval.json",
+    "lane": "intent",
+    "chars": 3041,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 60975,
+      "usage": {
+        "completion_tokens": 745,
+        "prompt_tokens": 15927,
+        "total_tokens": 16672,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 58066.544512,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-refresh",
+    "checkpoint": "before-approval.json",
+    "lane": "execution",
+    "chars": 6573,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 186697,
+      "usage": {
+        "completion_tokens": 1675,
+        "prompt_tokens": 54798,
+        "total_tokens": 56473,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 71657.87712599999,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-thinking",
+    "checkpoint": "after-approval.json",
+    "lane": "intent",
+    "chars": 2658,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 8618,
+      "usage": {
+        "completion_tokens": 1640,
+        "prompt_tokens": 2217,
+        "total_tokens": 3857,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 23099.952632999994,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-thinking",
+    "checkpoint": "after-approval.json",
+    "lane": "execution",
+    "chars": 2747,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 11285,
+      "usage": {
+        "completion_tokens": 1092,
+        "prompt_tokens": 2903,
+        "total_tokens": 3995,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 17357.120765,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-thinking",
+    "checkpoint": "before-approval.json",
+    "lane": "intent",
+    "chars": 2758,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 60266,
+      "usage": {
+        "completion_tokens": 1669,
+        "prompt_tokens": 15799,
+        "total_tokens": 17468,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 78918.88552499999,
+      "finishReason": "stop"
+    }
+  },
+  {
+    "directory": "cron-thinking",
+    "checkpoint": "before-approval.json",
+    "lane": "execution",
+    "chars": 4459,
+    "rejected": null,
+    "introducedKnownUnsupportedEvidence": [],
+    "metrics": {
+      "inputChars": 185988,
+      "usage": {
+        "completion_tokens": 2152,
+        "prompt_tokens": 54670,
+        "total_tokens": 56822,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "durationMs": 86188.943725,
+      "finishReason": "stop"
+    }
+  }
+]

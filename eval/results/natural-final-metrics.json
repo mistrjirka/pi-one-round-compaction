@@ -1,0 +1,41 @@
+{
+  "wallMs": 143270.516848,
+  "reasoning": "natural, no forced cutoff",
+  "maxTokens": 12288,
+  "rows": [
+    {
+      "lane": "intent",
+      "durationMs": 143270.22229499999,
+      "usage": {
+        "completion_tokens": 12288,
+        "prompt_tokens": 2438,
+        "total_tokens": 14726,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "length",
+      "reasoningChars": 55513,
+      "textChars": 0,
+      "duplicateSectionRejection": null,
+      "validLane": false
+    },
+    {
+      "lane": "execution",
+      "durationMs": 31520.591285,
+      "usage": {
+        "completion_tokens": 2130,
+        "prompt_tokens": 3202,
+        "total_tokens": 5332,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finishReason": "stop",
+      "reasoningChars": 6083,
+      "textChars": 3077,
+      "duplicateSectionRejection": null,
+      "validLane": true
+    }
+  ]
+}

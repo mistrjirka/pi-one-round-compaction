@@ -1100,6 +1100,15 @@ export type ContinuationLaneRole = "intent" | "execution" | "implementation" | "
  * silently publishing a checkpoint with no explicit resume point.
  */
 export function protectLaneAnchor(result: LaneResult, role: ContinuationLaneRole): LaneResult {
+  // Carry-forward parses H2 sections by name. Accepting duplicate sections can
+  // silently replace current state with an echoed historical checkpoint.
+  const seenHeadings = new Set<string>();
+  for (const match of result.text.matchAll(/^## ([^\r\n]+?)\s*$/gm)) {
+    const heading = match[1]?.trim();
+    if (!heading) continue;
+    if (seenHeadings.has(heading)) throw new Error(`${role} lane returned a duplicate checkpoint section: ${heading}`);
+    seenHeadings.add(heading);
+  }
   const requiredHeading = role === "evidence"
     ? "Evidence Anchor"
     : role === "execution" || role === "implementation"
@@ -1110,10 +1119,10 @@ export function protectLaneAnchor(result: LaneResult, role: ContinuationLaneRole
   const source = role === "evidence"
     ? h2Section(result.text, "Unresolved Risks / Open Questions") ?? h2Section(result.text, "Verification State")
     : h2Section(result.text, "Remaining / Immediate Next Actions");
+  // Incidental completion language (including "not complete", quoted output,
+  // or a completed subtask) cannot establish the state of this lane.
   const body = source?.trim()
-    || (/\bCOMPLETE\b/i.test(result.text)
-      ? "COMPLETE"
-      : "UNKNOWN — the summarizer omitted the required continuation state. Re-check retained recent context and the current user/intent contract before taking a new action.");
+    || "UNKNOWN — the summarizer omitted the required continuation state. Re-check retained recent context and the current user/intent contract before taking a new action.";
   return { ...result, text: `## ${requiredHeading}\n${body}\n\n${result.text.trim()}` };
 }
 

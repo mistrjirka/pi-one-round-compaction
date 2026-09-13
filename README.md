@@ -261,6 +261,8 @@ Each lane may independently override `model`, `thinkingLevel`, or `maxOutputToke
 
 `fallbackToNative` defaults to `false`. This guarantees that a failed lane does not silently trigger a later native LLM summarization call. Setting it to `true` trades that guarantee for automatic recovery.
 
+When a lane fails, the extension aborts its sibling model request as well (actual interruption depends on the provider honoring the abort signal). Duplicate H2 sections within a lane are rejected because they make current versus historical checkpoint state ambiguous; custom prompt overrides should keep section headings unique. If the continuation anchor and its source section are both missing, the fallback reports UNKNOWN: incidental words such as “not complete” or “build complete” cannot establish that the task is finished.
+
 ## Post-compaction target and recent-turn budget
 
 Pi's setting remains the upper bound for verbatim recent context:

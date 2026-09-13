@@ -61,7 +61,8 @@ test("new oversized user sources are classified before old durable references ca
   assert.deepEqual(ordered.map((value) => value.id), ["U0003", "U0001", "U0002"]);
 });
 
-test("extension launches exactly two LLM lanes concurrently and deterministically merges them", async () => {
+for (const failOneLane of [false, true]) {
+test(failOneLane ? "failed lane cancels the sibling model request" : "extension launches exactly two LLM lanes concurrently and deterministically merges them", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-test-"));
   const agentDir = path.join(root, "agent");
   const cwd = path.join(root, "repo");
@@ -104,6 +105,7 @@ test("extension launches exactly two LLM lanes concurrently and deterministicall
     let inFlight = 0;
     let maxInFlight = 0;
     let calls = 0;
+    const signals: AbortSignal[] = [];
     const fakeCtx = {
       cwd,
       sessionManager: { getSessionId: () => "test-session" },
@@ -113,13 +115,15 @@ test("extension launches exactly two LLM lanes concurrently and deterministicall
         find(provider: string, modelId: string) {
           return provider === model.provider && modelId === model.id ? model : undefined;
         },
-        async complete(_model: unknown, request: { messages: Array<{ content: Array<{ text?: string }> }> }) {
+        async complete(_model: unknown, request: { messages: Array<{ content: Array<{ text?: string }> }> }, options: { signal: AbortSignal }) {
+          signals.push(options.signal);
           calls++;
           inFlight++;
           maxInFlight = Math.max(maxInFlight, inFlight);
           await new Promise((resolve) => setTimeout(resolve, 30));
           inFlight--;
           const prompt = request.messages[0]?.content[0]?.text ?? "";
+          if (failOneLane && prompt.includes("Current Objective")) throw new Error("simulated intent lane failure");
           const text = prompt.includes("Current Objective")
             ? "## Current Objective\nCurrent plan\n\n## Accepted Plan / Scope\n- Do the work\n\n## Constraints / Exclusions / User Corrections\n- Do not touch UI"
             : "## Done\n- inspected\n\n## Current Code / Repository State\n- backend\n\n## Verification State\n- NOT RUN\n\n## Adjustments / Discoveries\n- none\n\n## Remaining / Immediate Next Actions\n1. implement";
@@ -164,11 +168,19 @@ test("extension launches exactly two LLM lanes concurrently and deterministicall
     };
 
     const result = await beforeCompact(event as never, fakeCtx as never) as {
+      cancel?: boolean;
       compaction?: { summary: string; details: { plugin: string; lanes: unknown[] }; estimatedTokensAfter?: number };
     };
 
     assert.equal(calls, 2);
     assert.equal(maxInFlight, 2);
+    if (failOneLane) {
+      assert.equal(result.cancel, true);
+      assert.equal(result.compaction, undefined);
+      assert.equal(signals.length, 2);
+      assert.ok(signals.every(signal => signal.aborted));
+      return;
+    }
     assert.equal(result.compaction?.details.plugin, "pi-one-round-compaction");
     assert.equal(result.compaction?.details.lanes.length, 2);
     assert.match(result.compaction?.summary ?? "", /## Task Semantics/);
@@ -179,6 +191,8 @@ test("extension launches exactly two LLM lanes concurrently and deterministicall
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
   }
 });
+
+}
 
 test("oversized human plan becomes an LLM-classified durable reference in the checkpoint", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-artifact-integration-"));

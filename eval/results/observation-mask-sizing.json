@@ -1,0 +1,16 @@
+{
+  "scope": "execution serialized view only, no lane instructions or deterministic ledger; sizing only, not a quality evaluation",
+  "retainedToolResults": 10,
+  "results": [
+    {
+      "name": "baseline",
+      "chars": 179127,
+      "tokens": 52900
+    },
+    {
+      "name": "mask-older-except-last-10",
+      "chars": 92284,
+      "tokens": 26126
+    }
+  ]
+}

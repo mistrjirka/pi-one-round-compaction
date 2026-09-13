@@ -1,3 +1,8 @@
 node_modules/
 *.tgz
 .DS_Store
+
+# Private source sessions and generated model traces
+eval/private/
+eval/results/*.log
+eval/results/*-before.tap

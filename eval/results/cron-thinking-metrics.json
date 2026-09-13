@@ -1,0 +1,80 @@
+{
+  "source": "opencode/ses_31d7bcf4cffe7fjGfy8LC6UJqU.json",
+  "sha256": "047fc047c17c80fd804ce28727557eef24d06c4a0f176305933716274c8c3b05",
+  "model": "/models/Ornith-1.5-35B-A3B/Ornith-1.5-35B-A3B-AD-Q6_K-Q5_K.gguf",
+  "reasoning": "1024-token budget",
+  "mtp": false,
+  "seed": 42,
+  "records": [
+    {
+      "name": "before-approval",
+      "start": 0,
+      "end": 143,
+      "wallMs": 86209.181028,
+      "summaryChars": 11804,
+      "lanes": [
+        {
+          "inputChars": 60266,
+          "usage": {
+            "completion_tokens": 1669,
+            "prompt_tokens": 15799,
+            "total_tokens": 17468,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 78918.88552499999,
+          "finishReason": "stop"
+        },
+        {
+          "inputChars": 185988,
+          "usage": {
+            "completion_tokens": 2152,
+            "prompt_tokens": 54670,
+            "total_tokens": 56822,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 86188.943725,
+          "finishReason": "stop"
+        }
+      ]
+    },
+    {
+      "name": "after-approval",
+      "start": 143,
+      "end": 144,
+      "wallMs": 23100.984408000004,
+      "summaryChars": 10043,
+      "lanes": [
+        {
+          "inputChars": 8618,
+          "usage": {
+            "completion_tokens": 1640,
+            "prompt_tokens": 2217,
+            "total_tokens": 3857,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 23099.952632999994,
+          "finishReason": "stop"
+        },
+        {
+          "inputChars": 11285,
+          "usage": {
+            "completion_tokens": 1092,
+            "prompt_tokens": 2903,
+            "total_tokens": 3995,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "durationMs": 17357.120765,
+          "finishReason": "stop"
+        }
+      ]
+    }
+  ]
+}
