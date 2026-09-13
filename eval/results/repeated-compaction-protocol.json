@@ -1,0 +1,88 @@
+{
+  "date": "2026-09-13",
+  "kind": "source-based development pilot, not a blinded holdout",
+  "chain_rule": "Each checkpoint receives the previous generated checkpoint plus only new source messages. No gold answers or future messages enter generation. A failed checkpoint stops that candidate.",
+  "cases": {
+    "cron": {
+      "boundaries": [
+        143,
+        144,
+        151
+      ],
+      "checks": [
+        {
+          "end": 143,
+          "goal": "Reliable bot behavior across the html fix, 400 recovery and current cron history-before-send issue",
+          "state": "HTML and LM Studio patches applied; current cron patch proposed, scope choice pending; targeted cron runtime verification planned"
+        },
+        {
+          "end": 144,
+          "goal": "Keep the current cron repair connected to duplicate-message prevention",
+          "state": "Cron-only choice resolved; patches and build/runtime verification still pending"
+        },
+        {
+          "end": 151,
+          "goal": "Cron history-before-send works without changing the main agent",
+          "state": "Both cron patches applied, subsequent build successful, targeted run_cron verification unobserved; no stale implementation blocker"
+        }
+      ]
+    },
+    "review": {
+      "boundaries": [
+        33,
+        73,
+        91,
+        150,
+        151,
+        156
+      ],
+      "checks": [
+        {
+          "end": 33,
+          "goal": "Find duplicates, bugs and improvements after checking actual usage",
+          "state": "Review report produced; assistant implementation priorities are proposals, not user decisions"
+        },
+        {
+          "end": 73,
+          "goal": "Deduplication is the stated higher concern alongside accepted JWT work",
+          "state": "JWT and notification/fallback, fetcher-validation and service-getter refactors accepted; no implementation observed; preserve scope exclusions and transport choices"
+        },
+        {
+          "end": 91,
+          "goal": "Preserve the deduplication goal while adding the recursion fix",
+          "state": "Rechecked plan and UUID fix accepted; keep both smaller dedup follow-ups, UI token choice and regression constraint"
+        },
+        {
+          "end": 150,
+          "goal": "Deduplication remains broader than the completed notification refactor",
+          "state": "JWT, UUID and notification changes applied; checks observed; fetcher-validation and service-getter completion unestablished"
+        },
+        {
+          "end": 151,
+          "goal": "User explicitly reaffirms deduplication as the main target",
+          "state": "Priority update alone neither completes nor cancels remaining refactors"
+        },
+        {
+          "end": 156,
+          "goal": "Continue broader deduplication after confirming the notification helpers",
+          "state": "Source reads confirm notification helpers; fetcher-validation and service-getter completion still unestablished; no need to redo applied changes or ask approval already given"
+        }
+      ]
+    }
+  },
+  "measurements": [
+    "goal and priority retention at every round",
+    "accepted remaining work",
+    "status and evidence consistency",
+    "fresh-reader next action",
+    "output format availability",
+    "input/output tokens and wall latency"
+  ],
+  "limitations": [
+    "synthetic boundaries in real archived OpenCode sessions",
+    "handoff probes, not tool-executing continuation",
+    "single task-specific seed",
+    "private development fixtures previously inspected",
+    "local cold-prompt V100 benchmark does not measure Qwen model swaps or warm-cache production performance"
+  ]
+}

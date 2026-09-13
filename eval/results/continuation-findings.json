@@ -1,0 +1,157 @@
+{
+  "method": "Manual source-based assessments; exact output/source excerpts and roles checked offline. Not automatic semantic grading or a held-out accuracy score.",
+  "findings": [
+    {
+      "case": "cron",
+      "version": "v1",
+      "artifact": "eval/private/continuation-v1/cron/checkpoint-0.json",
+      "cutoff": 143,
+      "finding": "Initial task crowds out later accepted work",
+      "outputQuote": "Fix TS2339: Property 'html'",
+      "artifactSha256": "57c9a81f34f5dcae641318ca5d7f7cb4088deeb282b3d484e54244ea98ab3188",
+      "sourceMessageIds": [
+        103,
+        142
+      ]
+    },
+    {
+      "case": "review",
+      "version": "v3",
+      "artifact": "eval/private/continuation-v3/review/checkpoint-1.json",
+      "cutoff": 73,
+      "finding": "Next action requests authorization already recorded",
+      "outputQuote": "Await user response to message 72's confirmation question",
+      "artifactSha256": "9fd76413903578606715597acba0f29ed66766d2cea68797954f8dbc7d81cc47",
+      "sourceMessageIds": [
+        71
+      ]
+    },
+    {
+      "case": "review",
+      "version": "v3",
+      "artifact": "eval/private/continuation-v3/review/checkpoint-2.json",
+      "cutoff": 91,
+      "finding": "New explicit instruction still becomes an authorization blocker",
+      "outputQuote": "Await explicit user go-ahead to execute",
+      "artifactSha256": "9d665e62c0f99ce98112e711a861f0c499f40094d23a44f0f6b87737158aea6b",
+      "sourceMessageIds": [
+        90
+      ]
+    },
+    {
+      "case": "review",
+      "version": "v3",
+      "artifact": "eval/private/continuation-v3/review/checkpoint-5.json",
+      "cutoff": 156,
+      "finding": "Successful verification is lost across checkpoints",
+      "outputQuote": "Notification dedup not yet verified with typecheck/build",
+      "artifactSha256": "7eca35663b470cb0fa644817d130602ada99d9495f2bfda64399803edbfae65f",
+      "sourceMessageIds": [
+        140,
+        146
+      ]
+    },
+    {
+      "case": "review",
+      "version": "v3",
+      "artifact": "eval/private/continuation-v3/review/checkpoint-5.json",
+      "cutoff": 156,
+      "finding": "Assistant completion claim is attributed to user",
+      "outputQuote": "User confirmed dedup was done",
+      "artifactSha256": "7eca35663b470cb0fa644817d130602ada99d9495f2bfda64399803edbfae65f",
+      "sourceMessageIds": [
+        155
+      ]
+    },
+    {
+      "case": "review",
+      "version": "v4",
+      "artifact": "eval/private/continuation-v4/review/checkpoint-3.json",
+      "cutoff": 150,
+      "finding": "Remaining accepted refactors disappear at an intermediate checkpoint",
+      "outputQuote": "Report implementation completion to user",
+      "artifactSha256": "7f5043af05dd12eb6ce55a1821759036b35b29c1215586fdafe859fa8b924c01",
+      "sourceMessageIds": [
+        89,
+        89,
+        71
+      ]
+    },
+    {
+      "case": "review",
+      "version": "v4",
+      "artifact": "eval/private/continuation-v4/review/reader-joint-round-3.md",
+      "cutoff": 150,
+      "finding": "Fresh reader incorrectly stops engineering work",
+      "outputQuote": "No code changes remain on the approved list.",
+      "artifactSha256": "1eeefd5fd019546c76f0459dde99d9a54364129b1a630f22e85c6a0fa97f00dc",
+      "sourceMessageIds": [
+        89,
+        71
+      ]
+    },
+    {
+      "case": "review",
+      "version": "v4",
+      "artifact": "eval/private/continuation-v4/review/checkpoint-5.json",
+      "cutoff": 156,
+      "finding": "Recovered accepted work is downgraded to pending permission",
+      "outputQuote": "pending user direction",
+      "artifactSha256": "38b63ecdefd2657cc5765f1031ca227ea5d703c09b57298a8aff7360b60b427b",
+      "sourceMessageIds": [
+        71,
+        150
+      ]
+    },
+    {
+      "case": "cron",
+      "version": "v3",
+      "artifact": "eval/private/continuation-v3/cron/checkpoint-2.json",
+      "cutoff": 151,
+      "finding": "Planned runtime verification becomes optional",
+      "outputQuote": "Optionally run a targeted run_cron",
+      "artifactSha256": "6d458f5dbb4cd8c8b6e905527fb42495bde54734bcb022777da81ef7aa91ca9f",
+      "sourceMessageIds": [
+        142,
+        143
+      ]
+    },
+    {
+      "case": "cron",
+      "version": "v3",
+      "artifact": "eval/private/continuation-v3/cron/checkpoint-2.json",
+      "cutoff": 151,
+      "finding": "Top-level scope remains stale after a resolved user choice",
+      "outputQuote": "and possibly main",
+      "artifactSha256": "6d458f5dbb4cd8c8b6e905527fb42495bde54734bcb022777da81ef7aa91ca9f",
+      "sourceMessageIds": [
+        143
+      ]
+    },
+    {
+      "case": "cron",
+      "version": "v3",
+      "artifact": "eval/private/continuation-v3/cron/reader-joint-recent.md",
+      "cutoff": 151,
+      "finding": "Raw recent exchange retains required runtime check correctly",
+      "outputQuote": "This is the last unverified \"accepted\" item.",
+      "artifactSha256": "a1917e25e91c7c2fac66cf76e5594db53743f99fdbb2e8699b5f0ea2589735bc",
+      "sourceMessageIds": [
+        142,
+        143
+      ]
+    },
+    {
+      "case": "cron",
+      "version": "v1",
+      "artifact": "eval/private/continuation-v1/cron/reader-masked.md",
+      "cutoff": 151,
+      "finding": "Masking control misreads requested verification command",
+      "outputQuote": "\"pnpm build\" as useless",
+      "artifactSha256": "a7a5978f2fb7011fb9e7ac2a444cabd83984c3d7ed60a5d3baba3b67726633cf",
+      "sourceMessageIds": [
+        41
+      ]
+    }
+  ]
+}

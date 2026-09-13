@@ -6,3 +6,6 @@ node_modules/
 eval/private/
 eval/results/*.log
 eval/results/*-before.tap
+
+# Python evaluation bytecode
+__pycache__/

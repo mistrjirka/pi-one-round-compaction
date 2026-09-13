@@ -1,0 +1,1003 @@
+{
+  "date": "2026-09-13",
+  "method": "Offline input/provenance checks; schema validity does not establish semantic correctness",
+  "cases": [
+    {
+      "case": "cron",
+      "source": "opencode/ses_31d7bcf4cffe7fjGfy8LC6UJqU.json",
+      "sourceSha256": "047fc047c17c80fd804ce28727557eef24d06c4a0f176305933716274c8c3b05",
+      "normalizedSha256": "ec4b0aa4d6f8a4d1a71dd3c734305fa1b4c635ab64104fc4be1669dcbc2f9b9a",
+      "boundaries": [
+        143,
+        144,
+        151
+      ]
+    },
+    {
+      "case": "review",
+      "source": "opencode/ses_308d8f938ffeDJXvOoECX8ECtZ.json",
+      "sourceSha256": "436fa6c80b919ee47fce2dc934de5396e478e857598b0fbf7ce67de27e0ab65e",
+      "normalizedSha256": "8b1e42bc8f655f0ef33d77d8927aeccd0c6ff6ad636f9d496ad5ac0a294e1d73",
+      "boundaries": [
+        33,
+        73,
+        91,
+        150,
+        151,
+        156
+      ]
+    }
+  ],
+  "records": [
+    {
+      "version": "v1",
+      "case": "cron",
+      "name": "compact-0",
+      "wallMs": 50951.65131400002,
+      "inputChars": 124243,
+      "usage": {
+        "completion_tokens": 2406,
+        "prompt_tokens": 34576,
+        "total_tokens": 36982,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 1161,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "2ea8577fbdb7827f733fe1d7c10a9ead5eff1f1aee08b94b324a5b4dbcc991fe",
+      "promptSha256": "7c9543450c53f7ec6558dabf2b6df4e0c9169f4c081f35774a0ea97ed2ac6d7b",
+      "schemaValid": true,
+      "cutoff": 143,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v1",
+      "case": "cron",
+      "name": "compact-1",
+      "wallMs": 26548.17087999999,
+      "inputChars": 2114,
+      "outputChars": 0,
+      "httpStatus": 500,
+      "seed": 42,
+      "requestArtifactSha256": "2bd590cff343cce909834bfa0f6946e33b8e7c0ee522bfb1ed10ffc19ece2c22",
+      "promptSha256": "9b47b894dd91c66466414266bf14591f1710654f9d062865b3e108038933a909",
+      "schemaValid": false,
+      "cutoff": 144,
+      "checkpointWritten": false,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v1",
+      "case": "cron",
+      "name": "reader-full",
+      "wallMs": 131595.38542200002,
+      "inputChars": 370829,
+      "usage": {
+        "completion_tokens": 2398,
+        "prompt_tokens": 111999,
+        "total_tokens": 114397,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3081,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "a719276a3a5c1990b1c7ac4c1e3b515cc880d9479e56601e6180f41a24f297aa",
+      "promptSha256": "f0c1ee913b287bace757cc02183f88167697ef944c9d53a17859b6d16b2fbbe1",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v1",
+      "case": "cron",
+      "name": "reader-masked",
+      "wallMs": 48857.06528500002,
+      "inputChars": 102971,
+      "usage": {
+        "completion_tokens": 2710,
+        "prompt_tokens": 28323,
+        "total_tokens": 31033,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3387,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "77b0fa3e887f38eceae4960653f3138d076684364eef758475516d541fa8b424",
+      "promptSha256": "8a4c7753430cbe0cd59d6071713a06b2c359844d0801684b6ed54df3885d2d85",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "compact-0",
+      "wallMs": 40658.914677,
+      "inputChars": 124243,
+      "usage": {
+        "completion_tokens": 1678,
+        "prompt_tokens": 34757,
+        "total_tokens": 36435,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 5336,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "b4c43b6178c9bf57f1ef30a38bd38e2dbd4a2daaccf423cff9479539abfd5cc2",
+      "promptSha256": "7c9543450c53f7ec6558dabf2b6df4e0c9169f4c081f35774a0ea97ed2ac6d7b",
+      "schemaValid": true,
+      "cutoff": 143,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "compact-1",
+      "wallMs": 18178.869590999995,
+      "inputChars": 5650,
+      "usage": {
+        "completion_tokens": 1648,
+        "prompt_tokens": 1706,
+        "total_tokens": 3354,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 5170,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "c4bc23ca6b979c8d85d9a757276d9b3a81bb1b159c93d6ef8e2c3273b90b5b95",
+      "promptSha256": "090151a0ba57d79bb327d6a0b79c58c7ca1b421da87e262ef38dbc074e844b51",
+      "schemaValid": true,
+      "cutoff": 144,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "compact-2",
+      "wallMs": 19475.689712000007,
+      "inputChars": 8378,
+      "usage": {
+        "completion_tokens": 1736,
+        "prompt_tokens": 2452,
+        "total_tokens": 4188,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 5298,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "20514e257e823483deeff10a014853e8504c93ab8c604a2963db7bd8675ad845",
+      "promptSha256": "43b9e1b4deeb2c3701c9e1aebd417eb8a88b7553a8849cd1598ceaedeb2ad7e9",
+      "schemaValid": true,
+      "cutoff": 151,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "reader-joint-receipts",
+      "wallMs": 34502.675623999996,
+      "inputChars": 23533,
+      "usage": {
+        "completion_tokens": 2880,
+        "prompt_tokens": 6631,
+        "total_tokens": 9511,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3201,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "7802239b9e3cebe33e8202b55a0c2e29e7b0f916e011a1a6d574e2a0ab814502",
+      "promptSha256": "b97652d2c668a0ee2741f189d083d660b80fc9bf12f5bffd18d4f7de6772695f",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "reader-joint-recent",
+      "wallMs": 25463.197751000003,
+      "inputChars": 9609,
+      "usage": {
+        "completion_tokens": 2271,
+        "prompt_tokens": 2870,
+        "total_tokens": 5141,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 2930,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "8807561246b22e15ff534181c022d6b72d7ca5956fa816b39ed3b2728bd2c3ab",
+      "promptSha256": "cd26944469ad6964095a14f4bbeb8ce8e04a3557c0a137aa1b5813fb3e0d808e",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "reader-joint-round-0",
+      "wallMs": 15614.645655,
+      "inputChars": 6731,
+      "usage": {
+        "completion_tokens": 1390,
+        "prompt_tokens": 2086,
+        "total_tokens": 3476,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3091,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "914a0efcc84881bd04a089f98e9bec4584288ac4fdc8e7067da0f0796c1827a2",
+      "promptSha256": "77b1b1214d0e28696c95a1ff847b4e18294a18a5256d3e335890643b9d418f70",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "reader-joint-round-1",
+      "wallMs": 10952.579219000001,
+      "inputChars": 6565,
+      "usage": {
+        "completion_tokens": 949,
+        "prompt_tokens": 2056,
+        "total_tokens": 3005,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3338,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "d3b9f8944a34ce2ed37b3c07740da472b80677cec798967c8e67bca757b46d64",
+      "promptSha256": "509a89b756ceaca97c94c340426f988233ec69cbe91d4915d42af33e81666060",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "cron",
+      "name": "reader-joint",
+      "wallMs": 22170.35303,
+      "inputChars": 6829,
+      "usage": {
+        "completion_tokens": 2005,
+        "prompt_tokens": 2179,
+        "total_tokens": 4184,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3094,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "1ff7805c14f2707e06a9e62a794ef3bab4aec3ad733ebda7fad2c70591460d5e",
+      "promptSha256": "02772ae41da383a673d9e13318f92d3abac73f551b29edc4bf134d77b6f31344",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v2",
+      "case": "review",
+      "name": "compact-0",
+      "wallMs": 33988.98436,
+      "inputChars": 51930,
+      "usage": {
+        "completion_tokens": 2406,
+        "prompt_tokens": 13507,
+        "total_tokens": 15913,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3002,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "a10d889b65b02899b612f78458b269c13eff0ec209708cf49dcbb34d4344be85",
+      "promptSha256": "134e7d3aa410a831e1a97c478318c64cc0f0aa139a76a4aba8f29ec1fa41d591",
+      "schemaValid": false,
+      "validationFailure": "ValueError: Duplicate key: item",
+      "cutoff": 33,
+      "checkpointWritten": false,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v2",
+      "case": "review",
+      "name": "reader-full",
+      "wallMs": 108969.5567,
+      "inputChars": 344292,
+      "usage": {
+        "completion_tokens": 1736,
+        "prompt_tokens": 103578,
+        "total_tokens": 105314,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3177,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "a4d6c4001f19b1d2e7cb2dc8cc12a06721e034ea0042ed72c76ee019eef2fefa",
+      "promptSha256": "6f89580e6597cfd03525a4eb91946df15c36255f6f1ff78cbc77348241aa0a27",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v2",
+      "case": "review",
+      "name": "reader-masked",
+      "wallMs": 52469.511605999985,
+      "inputChars": 113316,
+      "usage": {
+        "completion_tokens": 2804,
+        "prompt_tokens": 31135,
+        "total_tokens": 33939,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3577,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "9c184cdaf30639ed7ad250b375d37809b92385d7aa4f83ce018b338e35c7f393",
+      "promptSha256": "0ba365b3721cb06cbc0062dd75f9754130769e8c28aa1b93e1b81be53306bce6",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "compact-0",
+      "wallMs": 16776.93697,
+      "inputChars": 51930,
+      "usage": {
+        "completion_tokens": 910,
+        "prompt_tokens": 13509,
+        "total_tokens": 14419,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3568,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "84615fc5e0763f35ccb7166bb168e7047315ac89cf8ceef9880c437be5a803bf",
+      "promptSha256": "134e7d3aa410a831e1a97c478318c64cc0f0aa139a76a4aba8f29ec1fa41d591",
+      "schemaValid": true,
+      "cutoff": 33,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "compact-1",
+      "wallMs": 20895.403983,
+      "inputChars": 34144,
+      "usage": {
+        "completion_tokens": 1484,
+        "prompt_tokens": 9371,
+        "total_tokens": 10855,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 5506,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "05084955cb2368f22797ca613a32e3cd67c7a00a593012547a9984927dcd5fcc",
+      "promptSha256": "71d2fe3aa647a48b5a9ce351ab668f8d6e9bb0044452961f86664191653ea1e4",
+      "schemaValid": true,
+      "cutoff": 73,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "compact-2",
+      "wallMs": 26584.225173,
+      "inputChars": 26160,
+      "usage": {
+        "completion_tokens": 2101,
+        "prompt_tokens": 7622,
+        "total_tokens": 9723,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 7822,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "746e6355a511db0ee4fd9fb2b6f810ace2c0969e3befafd21a79151fcb68e662",
+      "promptSha256": "309e1bc17dfec9a7d83d78326cb25a1414ac9c8fdec7f8e6e17be6cc561db001",
+      "schemaValid": true,
+      "cutoff": 91,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "compact-3",
+      "wallMs": 42612.413093999996,
+      "inputChars": 90245,
+      "usage": {
+        "completion_tokens": 2418,
+        "prompt_tokens": 25274,
+        "total_tokens": 27692,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 8152,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "0ceba05c0d8419e4d79127657ef1a94a8571c6ff0f0e67bfecc5d6f569025040",
+      "promptSha256": "b014dcab05077a2abc8ff536c56ba7785fbcc3de018e857e46d93fc7009423d0",
+      "schemaValid": true,
+      "cutoff": 150,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "compact-4",
+      "wallMs": 30336.394545000003,
+      "inputChars": 8156,
+      "usage": {
+        "completion_tokens": 2774,
+        "prompt_tokens": 2269,
+        "total_tokens": 5043,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 9500,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "473ade540fbb8f3a60bb8191577821c521070d05a7d7b18ee4a84cefff46bf4c",
+      "promptSha256": "bd6db4fc5e081940cb152d1c6a61216b624df34d9862d794cb5040f957e3ef76",
+      "schemaValid": true,
+      "cutoff": 151,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "compact-5",
+      "wallMs": 31049.313626000017,
+      "inputChars": 23658,
+      "usage": {
+        "completion_tokens": 2551,
+        "prompt_tokens": 6889,
+        "total_tokens": 9440,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 8709,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "a8706dc944c14e7545d304effc0c4f2fce7547369c4a7568b103263f579af9fe",
+      "promptSha256": "c4e1ea70cd116e217c0bb796e19ca780ff0a796c23b8de5ee6b945eff8ea2048",
+      "schemaValid": true,
+      "cutoff": 156,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint-receipts",
+      "wallMs": 24549.714374000003,
+      "inputChars": 26262,
+      "usage": {
+        "completion_tokens": 1948,
+        "prompt_tokens": 7048,
+        "total_tokens": 8996,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3109,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "8ef088f6653170219b69538db17f024735634d45307bf8f2d52e90377b6cb621",
+      "promptSha256": "96c2ff7e2048bee5be12128363600fcac9df96528a21909915db628b61dc9639",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint-recent",
+      "wallMs": 25477.52111,
+      "inputChars": 25628,
+      "usage": {
+        "completion_tokens": 1994,
+        "prompt_tokens": 7601,
+        "total_tokens": 9595,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3416,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "f34a46fd384525b9f1c0060bc018ca590d2f449df633991d659e7f54b668e9a3",
+      "promptSha256": "e6ef732d2c160199d1bd473b923e10b7a34f1c1cd1bcb0dd773489926baf9579",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint-round-0",
+      "wallMs": 14185.68524,
+      "inputChars": 4323,
+      "usage": {
+        "completion_tokens": 1291,
+        "prompt_tokens": 1154,
+        "total_tokens": 2445,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3313,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "7ba1a357a77a64597c1a43ecc392db6b2c39de76515667176a1766e317bc24ab",
+      "promptSha256": "7ea91f9f191fb3ea37b19ed7fb81e71c43d32c67b00cf58ffa77e81e5106ad09",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint-round-1",
+      "wallMs": 15081.243649,
+      "inputChars": 6685,
+      "usage": {
+        "completion_tokens": 1351,
+        "prompt_tokens": 1839,
+        "total_tokens": 3190,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3236,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "92950242af701d25c7412cf25df42808caac5433aee674ad81e1423fa60e6a44",
+      "promptSha256": "3522b211c2ef3f468ba0908a722156fe621e274d5399fc577d3cbdab022b6ad0",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint-round-2",
+      "wallMs": 19319.159317,
+      "inputChars": 9193,
+      "usage": {
+        "completion_tokens": 1719,
+        "prompt_tokens": 2509,
+        "total_tokens": 4228,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 2944,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "29fd51faf55302abe67fc3bfbafc7f46ee36af95b24f0d109a17f4769ee15bf7",
+      "promptSha256": "9e11167e86b564d1d2299ed67a048f1ae0d6ece541a169a9afed7d6625b7dae3",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint-round-3",
+      "wallMs": 19986.542587000004,
+      "inputChars": 9963,
+      "usage": {
+        "completion_tokens": 1758,
+        "prompt_tokens": 2938,
+        "total_tokens": 4696,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3154,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "ae5d5363709e5fb183f282b3c71618804124e2aa369291284631bdb001c3631c",
+      "promptSha256": "7855d7b3ca1a4820720c9aa71b646294ccda46e6e805aadd370c04291b1c31a6",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint-round-4",
+      "wallMs": 11836.603687999988,
+      "inputChars": 9991,
+      "usage": {
+        "completion_tokens": 984,
+        "prompt_tokens": 2944,
+        "total_tokens": 3928,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3418,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "f4508d14156ff3bd1557e60f05985757befd60660565d40e9c29823fc0b179e1",
+      "promptSha256": "f99bdb43ec02475bf3ee9dac63bc704b03d7cdcafa8e241486997b88ca8caacc",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v3",
+      "case": "review",
+      "name": "reader-joint",
+      "wallMs": 18187.63393000001,
+      "inputChars": 10552,
+      "usage": {
+        "completion_tokens": 1579,
+        "prompt_tokens": 3079,
+        "total_tokens": 4658,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3393,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "7aa9f849ddd0959195cedd091ac96b29f0b362403a94ad7743eb69d36b477985",
+      "promptSha256": "91ae870fced5d5fca9efb57fc1eed1438a82c93e9ec99ae5619b3b61a8581615",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "compact-0",
+      "wallMs": 16288.583663000001,
+      "inputChars": 52526,
+      "usage": {
+        "completion_tokens": 842,
+        "prompt_tokens": 13631,
+        "total_tokens": 14473,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3065,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "b36b5a95bf7b408d68f11fb876212113b608f008db48c46f174d6e6dfc2987b8",
+      "promptSha256": "20642085999a4f31f1fb43042a1d2f82644eebf2e9980addf8f9d78121e8a8c4",
+      "schemaValid": true,
+      "cutoff": 33,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "compact-1",
+      "wallMs": 25253.123413999994,
+      "inputChars": 43167,
+      "usage": {
+        "completion_tokens": 1742,
+        "prompt_tokens": 11735,
+        "total_tokens": 13477,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 6289,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "bc9d9a2c033c2eff709b90de14d326ff86cd6b4d7f852d9232f2ee57ce019a47",
+      "promptSha256": "cfabf6e4065e939909138085c2b1bbb5064fe3116c82ccaaa9b43304b24dccee",
+      "schemaValid": true,
+      "cutoff": 73,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "compact-2",
+      "wallMs": 25905.434225000005,
+      "inputChars": 39702,
+      "usage": {
+        "completion_tokens": 1836,
+        "prompt_tokens": 11044,
+        "total_tokens": 12880,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 6881,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "2b1bb156bd5a72370e869ea0750be009be70fee6f77a6c999a0174a509ed526a",
+      "promptSha256": "af7de5bfada9a9574e3c5e97ad93aa0b0cb819f6eb536cc92d6dacc4ecbbbbce",
+      "schemaValid": true,
+      "cutoff": 91,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "compact-3",
+      "wallMs": 29101.48977700001,
+      "inputChars": 102739,
+      "usage": {
+        "completion_tokens": 1133,
+        "prompt_tokens": 28457,
+        "total_tokens": 29590,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3780,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "644c639a30210c677ce3a046bddcc02b186c7d4c916461b2931c41773a5b0491",
+      "promptSha256": "c7a17678d52a8f6a5329ac396176d34523fd260550006fbbf032d63cbad92ae2",
+      "schemaValid": true,
+      "cutoff": 150,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "compact-4",
+      "wallMs": 15340.968964,
+      "inputChars": 19625,
+      "usage": {
+        "completion_tokens": 1189,
+        "prompt_tokens": 5134,
+        "total_tokens": 6323,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 4134,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "8aadb5e262a9fcc7c026aba3fb1e6a5988d7389a53a8f8afc81d3751ff0f9bd6",
+      "promptSha256": "18bca507491c91f3fe7bcafdd82a2950566b597d8c080e698ff4883a4d63ded0",
+      "schemaValid": true,
+      "cutoff": 151,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "compact-5",
+      "wallMs": 18160.242203,
+      "inputChars": 35782,
+      "usage": {
+        "completion_tokens": 1213,
+        "prompt_tokens": 9878,
+        "total_tokens": 11091,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 4322,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "93d166b3b4220b20d7b001b075aeaf46e2e050fd9edc9cf53bbc04b467be8ff2",
+      "promptSha256": "74a27e02e7766b45201abb3a0d65f0bc1018281394bf41b9f1ac5d54f8389dfa",
+      "schemaValid": true,
+      "cutoff": 156,
+      "checkpointWritten": true,
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "reader-joint-receipts",
+      "wallMs": 21575.763899000012,
+      "inputChars": 20994,
+      "usage": {
+        "completion_tokens": 1760,
+        "prompt_tokens": 5505,
+        "total_tokens": 7265,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3422,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "712e4ebfeaeda681569e123f30665f78d10649579012ac2ed968167ada23e1f7",
+      "promptSha256": "f2ceee6631637b845cddc23ac5e7742c1cd91280034662c9a5b8f4c75559238c",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "reader-joint-round-0",
+      "wallMs": 13554.862560000001,
+      "inputChars": 3884,
+      "usage": {
+        "completion_tokens": 1238,
+        "prompt_tokens": 1102,
+        "total_tokens": 2340,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3304,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "0ee15c93c115cf761583df63090fba18e13333e3294502e4c9a5d4e21bf41e49",
+      "promptSha256": "70f0eae66c7ae85834044f66b6de8f04a1689bb418f7c8cd600a4fdcf697ff99",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "reader-joint-round-1",
+      "wallMs": 19021.777452000002,
+      "inputChars": 7468,
+      "usage": {
+        "completion_tokens": 1718,
+        "prompt_tokens": 2106,
+        "total_tokens": 3824,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3180,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "e973a2beaa15da9e18ae47ce222b0dcacc4f6b110c9e240413e4500643675a80",
+      "promptSha256": "12acaaafce218a1affd5f38650797b90f915816414400fce26cf12fbd8771500",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "reader-joint-round-2",
+      "wallMs": 18204.389741,
+      "inputChars": 8876,
+      "usage": {
+        "completion_tokens": 1617,
+        "prompt_tokens": 2507,
+        "total_tokens": 4124,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3080,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "5dcd6b1bf570e83816e658c8edccdf3b5ce7692b22c55a547199bab634d6a762",
+      "promptSha256": "d9bdebec36433232e2fb1cc67ee0dc7b2d26dc57324f94ff0c678422a944f3e8",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "reader-joint-round-3",
+      "wallMs": 16393.065610000005,
+      "inputChars": 4271,
+      "usage": {
+        "completion_tokens": 1508,
+        "prompt_tokens": 1303,
+        "total_tokens": 2811,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3293,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "ce7538f02581a995f09357c5be696f3f691e38c8dadb44993009e2fc0cacb31f",
+      "promptSha256": "1805d84133615b0a0cb617851847c99f9288a4d8ad93429671bbbf976c4a197c",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "reader-joint-round-4",
+      "wallMs": 10933.295280999999,
+      "inputChars": 5049,
+      "usage": {
+        "completion_tokens": 974,
+        "prompt_tokens": 1477,
+        "total_tokens": 2451,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3698,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "212b28517dd50f048a84b8af1831fa91d61543ea4d8c3c623a1a3f8ba677df27",
+      "promptSha256": "c0d6bd0fc1789c06478db0eca21dd6c255f61ca126af032560662b6d78f8959a",
+      "inputProvenanceVerified": true
+    },
+    {
+      "version": "v4",
+      "case": "review",
+      "name": "reader-joint",
+      "wallMs": 9883.194322999989,
+      "inputChars": 5284,
+      "usage": {
+        "completion_tokens": 871,
+        "prompt_tokens": 1536,
+        "total_tokens": 2407,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "finish": "stop",
+      "outputChars": 3352,
+      "httpStatus": 200,
+      "seed": 42,
+      "requestArtifactSha256": "fddac96b491aa07299aa7e9d2189de7e35d4b9bb2a578a4aa3e0d43ef002491c",
+      "promptSha256": "a008f986e5b3cdc346630c7d1379653e90ed57f6c8f8a465f6f37cccad6b1b85",
+      "inputProvenanceVerified": true
+    }
+  ]
+}

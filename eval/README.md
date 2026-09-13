@@ -58,3 +58,39 @@ Next: keep an exact lightweight plan/checklist outside repeated summaries withou
 ## Goal and progress retention audit
 
 See [retention-evaluation.md](retention-evaluation.md) for public dataset candidates, sixteen source-linked assertions, manual scoring of two archived final checkpoints, and the question-answer routing audit. No additional model runs or production changes were made in that pass.
+
+
+## Repeated compaction and fresh-reader pilot (2026-09-13)
+
+The new pilot completed two six-boundary chains on the review/deduplication session and one three-boundary chain on the cron session. Every round consumes only its previous generated checkpoint plus new messages. Variant v4 additionally retains bounded source excerpts of user decisions and their preceding proposals outside recursive summarization. Neither experimental state format was promoted to production: v3 lost verification state; v4 dropped accepted work at an intermediate checkpoint and later treated it as optional.
+
+There were 42 live Ornith requests, including 18 compactor requests and 24 reader probes. Every checkpoint in the three completed chains has a fresh-reader probe; full-context, old-observation masking and recent-verbatim-context conditions provide controls. These are real archived OpenCode messages at synthetic boundaries, not native Pi end-to-end tool execution or a held-out benchmark. The existing production raw-suffix mechanism remains unchanged.
+
+One runner implements all four versioned experiments without changing their saved requests. Node 22 and the existing private normalized fixtures are required. Start a compatible Ornith server at 127.0.0.1:18473 with alias ornith-compaction-eval before new inference. The exact request settings and outputs are stored in ignored eval/private/continuation-v*/ directories. Existing results are reused only if prompts, system instructions and all request settings match. Failed cached requests remain failures.
+
+```bash
+node eval/run-continuation.mjs review joint v3
+node eval/run-continuation.mjs review rounds v3
+node eval/run-continuation.mjs review joint v4
+node eval/run-continuation.mjs review rounds v4
+node eval/run-continuation.mjs cron joint v3
+node eval/run-continuation.mjs cron rounds v3
+node eval/run-continuation.mjs cron recent v3
+node eval/run-continuation.mjs review recent v3
+# The saved full/masked controls use identical reader settings:
+node eval/run-continuation.mjs cron controls v1
+node eval/run-continuation.mjs review controls v2
+```
+
+Version definitions: v1 sends a hidden API JSON schema with capped thinking; v2 states the schema explicitly and requests ordinary JSON with the same thinking budget; v3 keeps the explicit schema but disables compactor thinking; v4 changes only v3's source input by refreshing decision excerpts at every boundary. Readers always use the same seed, prompt and thinking budget. Temperature is omitted. V1/v2 stopped on output failures; the runner does not repair content or silently fall back to another model. The strict validator accepts one complete JSON fence but rejects duplicate keys, missing descriptions, unsupported statuses and future source IDs.
+
+Offline checks require no running model:
+
+```bash
+node --test eval/test-context-strategies.mjs
+python3 eval/test-checkpoint-validation.py
+node eval/check-continuation.mjs
+python3 eval/check-continuation-findings.py
+```
+
+Results: [protocol](results/repeated-compaction-protocol.json), [all request metrics and provenance](results/continuation-audit.json), [12 source-linked manual findings](results/continuation-findings.json). The provenance checker rebuilds every source prefix, recursive input and reader context. The findings checker validates exact excerpts, source roles and cutoffs; it does not automate semantic grading. Private prompts, source histories and raw responses stay ignored. Total latency comparisons must include compaction cost and actual cache behavior; shorter final prompts alone do not establish a speed or quality win.
