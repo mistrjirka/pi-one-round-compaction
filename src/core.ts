@@ -8,6 +8,7 @@ import {
   type AssistantMessage,
   type Message,
   type Model,
+  type ProviderHeaders,
   type ProviderStreamOptions,
   type Usage,
   uuidv7,
@@ -1134,6 +1135,36 @@ export function parseModelReference(reference: string): { provider: string; mode
   return provider && modelId ? { provider, modelId } : undefined;
 }
 
+// Extension model calls do not pass through Pi's AgentSession attribution transform.
+// OpenCode Go requires the same session routing headers that Pi adds to normal agent requests.
+function openCodeSessionHeaders(model: { provider: string; baseUrl: string }, sessionId: string): ProviderHeaders | undefined {
+  let usesOpenCodeHost = false;
+  try {
+    usesOpenCodeHost = new URL(model.baseUrl).hostname === "opencode.ai";
+  } catch {
+    // Provider id is still sufficient for the built-in OpenCode providers.
+  }
+
+  if (model.provider !== "opencode" && model.provider !== "opencode-go" && !usesOpenCodeHost) return undefined;
+  return { "x-opencode-session": sessionId, "x-opencode-client": "pi" };
+}
+
+function mergeProviderHeaders(
+  base: ProviderHeaders | undefined,
+  override: ProviderHeaders | undefined,
+): ProviderHeaders | undefined {
+  if (!base && !override) return undefined;
+  const merged: ProviderHeaders = { ...(base ?? {}) };
+  for (const [name, value] of Object.entries(override ?? {})) {
+    const lowerName = name.toLowerCase();
+    for (const existingName of Object.keys(merged)) {
+      if (existingName.toLowerCase() === lowerName) delete merged[existingName];
+    }
+    merged[name] = value;
+  }
+  return merged;
+}
+
 function reasoningEffortFor(model: Model<any>, thinkingLevel: ThinkingLevel): string | undefined {
   if (thinkingLevel === "off" || !model.reasoning) return undefined;
   if (model.thinkingLevelMap && model.thinkingLevelMap[thinkingLevel] === null) {
@@ -1185,11 +1216,14 @@ export async function runLane(params: {
       },
     ],
   };
+  const sessionId = uuidv7();
+  const sessionHeaders = openCodeSessionHeaders(model, sessionId);
   const baseOptions: ProviderStreamOptions = {
     maxTokens: Math.min(params.config.maxOutputTokens, model.maxTokens || params.config.maxOutputTokens),
     signal: params.signal,
     cacheRetention: "none",
-    sessionId: uuidv7(),
+    sessionId,
+    ...(sessionHeaders ? { headers: sessionHeaders } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 
@@ -1214,10 +1248,11 @@ export async function runLane(params: {
     if (!auth.ok) throw new Error(`${params.lane} lane auth failed: ${auth.error}`);
 
     const requestModel = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
+    const headers = mergeProviderHeaders(auth.headers, sessionHeaders);
     const options: ProviderStreamOptions = {
       ...baseOptions,
       ...(auth.apiKey !== undefined ? { apiKey: auth.apiKey } : {}),
-      ...(auth.headers !== undefined ? { headers: auth.headers } : {}),
+      ...(headers !== undefined ? { headers } : {}),
       ...(auth.env !== undefined ? { env: auth.env } : {}),
     };
 
