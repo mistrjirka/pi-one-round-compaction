@@ -7,6 +7,7 @@ import { emptyUsageForTests } from "../src/core.js";
 import { prepareWholeTurnCompactionWithUnderfillRecovery } from "../src/retention.js";
 
 type CompactionInput = Pick<SessionBeforeCompactEvent, "preparation" | "branchEntries">;
+type CompactionMessage = Extract<CompactionInput["branchEntries"][number], { type: "message" }>["message"];
 
 function user(content: string) {
   return { role: "user" as const, content, timestamp: Date.now() };
@@ -25,7 +26,7 @@ function assistant(text: string) {
   };
 }
 
-function messageEntry(id: string, message: CompactionInput["branchEntries"][number] extends { type: "message"; message: infer M } ? M : never) {
+function messageEntry(id: string, message: CompactionMessage) {
   return {
     type: "message" as const,
     id,
