@@ -29,6 +29,7 @@ import {
   type LaneName,
   type OneRoundDetails,
 } from "./core.js";
+import { prepareWholeTurnCompactionWithUnderfillRecovery } from "./retention.js";
 import { createProgressReporter } from "./progress.js";
 import { getPreflightProjection, projectionExceedsContext } from "./preflight.js";
 import {
@@ -421,7 +422,11 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       deterministicReserveChars,
     });
 
-    const boundary = prepareWholeTurnCompaction(event, effectiveRecentTokenBudget);
+    const boundary = prepareWholeTurnCompactionWithUnderfillRecovery(
+      event,
+      effectiveRecentTokenBudget,
+      config.targetPostCompactTokens,
+    );
     const previousSummary = shouldCarryPreviousCheckpointForIntent(event.branchEntries, intentWorkflow)
       ? boundary.previousSummary
       : undefined;
