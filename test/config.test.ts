@@ -3,10 +3,10 @@ import test from "node:test";
 
 import { DEFAULT_CONFIG, parseConfig, resolveLaneConfig } from "../src/config.js";
 
-test("defaults use Muse Spark with a stronger continuation/intent lane", () => {
+test("defaults use Muse Spark with a stronger work-audit lane", () => {
   assert.equal(DEFAULT_CONFIG.model, "opencode-go/muse-spark-1.2-contributor");
   assert.equal(DEFAULT_CONFIG.thinkingLevel, "low");
-  assert.equal(resolveLaneConfig(DEFAULT_CONFIG, "intent").thinkingLevel, "medium");
+  assert.equal(resolveLaneConfig(DEFAULT_CONFIG, "audit").thinkingLevel, "medium");
   assert.equal(resolveLaneConfig(DEFAULT_CONFIG, "execution").thinkingLevel, "low");
   assert.equal(DEFAULT_CONFIG.thinkingChars, 0);
   assert.equal(DEFAULT_CONFIG.preflightAutoCompact, true);
@@ -16,7 +16,6 @@ test("defaults use Muse Spark with a stronger continuation/intent lane", () => {
   assert.equal(DEFAULT_CONFIG.userArtifactPreviewChars, 600);
   assert.equal(DEFAULT_CONFIG.userArtifactCandidateChars, 12_000);
   assert.equal(DEFAULT_CONFIG.userArtifactReferenceChars, 4_000);
-  assert.equal(DEFAULT_CONFIG.intentWorkflowChars, 8_000);
   assert.equal(DEFAULT_CONFIG.gitStateChars, 4_000);
   assert.equal(DEFAULT_CONFIG.editedFilesChars, 6_000);
   assert.equal(DEFAULT_CONFIG.readFilesChars, 1_000);
@@ -30,10 +29,15 @@ test("project-style overrides merge lanes", () => {
       execution: { thinkingLevel: "medium", maxOutputTokens: 4096 },
     },
   });
-  assert.equal(resolveLaneConfig(config, "intent").thinkingLevel, "medium");
+  assert.equal(resolveLaneConfig(config, "audit").thinkingLevel, "medium");
   assert.equal(resolveLaneConfig(config, "execution").thinkingLevel, "medium");
   assert.equal(resolveLaneConfig(config, "execution").maxOutputTokens, 4096);
   assert.equal(config.toolResultChars, 1500);
+});
+
+test("removed intent settings fail closed", () => {
+  assert.throws(() => parseConfig({ intentWorkflowChars: 8000 }), /Unknown one-round-compaction key: intentWorkflowChars/);
+  assert.throws(() => parseConfig({ lanes: { intent: {} } }), /Unknown lanes key: intent/);
 });
 
 test("unknown keys fail closed", () => {

@@ -23,13 +23,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { OneRoundCompactionConfig, ThinkingLevel } from "./config.js";
-import { renderIntentWorkflow, type ActiveIntentWorkflow } from "./intent-workflow.js";
 import { SPLIT_TURN_NOTE } from "./prompts.js";
 import { renderDurableUserReferences, type DurableUserReference, type UserArtifactLocator, type UserArtifactRecord } from "./user-artifacts.js";
 
 const execFileAsync = promisify(execFile);
 
-export type LaneName = "intent" | "execution";
+export type LaneName = "audit" | "execution";
 
 export interface LaneResolvedConfig {
   model: string;
@@ -62,18 +61,11 @@ export interface UserMessageLedgerEntry {
 }
 
 export interface DeterministicRenderBudgets {
-  intentWorkflowChars: number;
   gitStateChars: number;
   editedFilesChars: number;
   readFilesChars: number;
   userMessagesChars: number;
   userArtifactReferencesChars: number;
-}
-
-export interface PendingIntentReconciliation {
-  workstream: string;
-  generation: number;
-  intentPath: string;
 }
 
 export interface DeterministicState {
@@ -94,14 +86,11 @@ export interface DeterministicState {
   knownUserArtifacts?: UserArtifactLocator[];
   /** Legacy/display IDs retained for backward compatibility and diagnostics. */
   knownUserArtifactIds?: string[];
-  intentWorkflow?: ActiveIntentWorkflow;
-  /** Recognized workstream whose old contract/checkpoint is intentionally suspended. */
-  pendingIntentReconciliation?: PendingIntentReconciliation;
 }
 
 export interface OneRoundDetails {
   plugin: "pi-one-round-compaction";
-  version: 5;
+  version: 6;
   lanes: Array<{
     lane: LaneName;
     model: string;
@@ -129,14 +118,6 @@ export interface OneRoundDetails {
   durableUserReferences: DurableUserReference[];
   renderBudgets: DeterministicRenderBudgets;
   git?: GitState;
-  intentWorkflow: {
-    active: boolean;
-    workstream?: string;
-    generation?: number;
-    hasPlan?: boolean;
-    intentTruncated?: boolean;
-    planTruncated?: boolean;
-  };
 }
 
 type CompactionMessage = Parameters<typeof convertToLlm>[0][number];
@@ -189,39 +170,6 @@ function serializeToolCallArguments(value: unknown, maxChars = 3000): string {
 function convertedMessageText(message: CompactionMessage): string {
   const converted = convertToLlm([message])[0];
   return converted ? contentText(converted.content, "").trim() : "";
-}
-
-/**
- * High-signal view for the task-semantics lane. Only native human role=user
- * messages count as user instructions; Pi custom/subagent/bash/summary messages
- * are deliberately omitted even though convertToLlm() maps them to LLM role=user.
- */
-export function serializeIntentView(messages: Parameters<typeof convertToLlm>[0]): string {
-  const parts: string[] = [];
-
-  for (const message of messages) {
-    if (message.role === "user") {
-      const text = contentText(message.content, "").trim();
-      if (text) parts.push(`[User]: ${text}`);
-      continue;
-    }
-
-    if (message.role === "assistant") {
-      const text = contentText(message.content, "").trim();
-      if (text) parts.push(`[Assistant]: ${clipEvidence(text, 3500)}`);
-      const tools = message.content
-        .filter((part) => part.type === "toolCall")
-        .map((part) => part.name);
-      if (tools.length > 0) parts.push(`[Assistant tools]: ${tools.join(", ")}`);
-    }
-
-    if (message.role === "branchSummary" || message.role === "compactionSummary") {
-      const text = convertedMessageText(message);
-      if (text) parts.push(`[Generated prior summary evidence — not user authority]: ${clipEvidence(text, 5000)}`);
-    }
-  }
-
-  return parts.join("\n\n");
 }
 
 function toolEvidenceBudget(toolName: string, baseChars: number): number {
@@ -420,13 +368,13 @@ export function collectUserMessageLedger(
     });
   }
 
-  // v4 details are a fallback for a future Pi that no longer exposes older raw
+  // v4+ details are a fallback for a future Pi that no longer exposes older raw
   // entries. Never consume v3 details: v3 accidentally admitted custom/subagent
   // notifications after convertToLlm() mapped them to role=user.
   for (let i = 0; i < end; i++) {
     const entry = branchEntries[i]!;
     if (entry.type !== "compaction" || !isObject(entry.details)) continue;
-    if (entry.details.plugin !== "pi-one-round-compaction" || (entry.details.version !== 4 && entry.details.version !== 5)) continue;
+    if (entry.details.plugin !== "pi-one-round-compaction" || (entry.details.version !== 4 && entry.details.version !== 5 && entry.details.version !== 6)) continue;
     const prior = entry.details.userMessages;
     if (!Array.isArray(prior)) continue;
     for (const value of prior) {
@@ -929,20 +877,6 @@ function renderDeterministicState(
   budgets: DeterministicRenderBudgets,
 ): string {
   const sections: string[] = [];
-  if (state.pendingIntentReconciliation && budgets.intentWorkflowChars > 0) {
-    const pending = state.pendingIntentReconciliation;
-    sections.push(clip(
-      [
-        "### Intent reconciliation required",
-        `Workstream: \`${pending.workstream}\``,
-        `Generation: ${pending.generation}`,
-        `Intent: \`${pending.intentPath}\``,
-        "Status: PENDING_RECONCILIATION",
-        "The previous durable intent contract and previous-generation checkpoint were intentionally suppressed. Before implementation governed by this workstream, update the current intent contract from the newest explicit user request and complete the intent-workflow confirmation. Do not reconstruct the old contract from memory.",
-      ].join("\n"),
-      budgets.intentWorkflowChars,
-    ));
-  }
   if (state.git) {
     const git = renderGitState(state.git, budgets.gitStateChars);
     if (git) sections.push(git);
@@ -976,30 +910,26 @@ function renderDeterministicState(
 /**
  * Previous checkpoints contain stale copies of deterministic state. Feed only the
  * previous output owned by this same lane back into the next LLM request. Current
- * intent/Git/user/file state is reconstructed independently below.
+ * Fresh Git/user/file state is reconstructed independently below.
  */
 export function compactPreviousSummaryForPrompt(
   summary: string | undefined,
   lane: LaneName = "execution",
-  workflowActive = false,
   maxChars = 12_000,
 ): string | undefined {
   const source = summary?.trim();
   if (!source) return undefined;
 
-  const startMarker = workflowActive
-    ? (lane === "intent" ? "## Implementation State" : "## Verification / Evidence State")
-    : (lane === "intent" ? "## Task Semantics" : "## Execution State");
+  const startMarker = lane === "audit" ? "## Work-State Audit" : "## Execution State";
   const start = source.indexOf(startMarker);
+  // On the first compaction after an upgrade, an older checkpoint may not have a
+  // work-audit section yet. Give the auditor the bounded historical checkpoint as
+  // fallible evidence instead of preserving any removed legacy lane machinery.
   if (start < 0) return clip(source, maxChars);
 
-  const endMarkers = workflowActive
-    ? lane === "intent"
-      ? ["\n## Verification / Evidence State"]
-      : ["\n## Deterministic Repository / Recent User State", "\n## Deterministic Repository / User State", "\n## Split-turn Context"]
-    : lane === "intent"
-      ? ["\n## Execution State"]
-      : ["\n## Deterministic State", "\n## Split-turn Context"];
+  const endMarkers = lane === "audit"
+    ? ["\n## Execution State"]
+    : ["\n## Deterministic State", "\n## Split-turn Context"];
 
   let end = source.length;
   for (const marker of endMarkers) {
@@ -1020,13 +950,23 @@ export function compactPreviousSummaryForPrompt(
     sections.set(heading, laneSource.slice(sectionStart, sectionEnd).trim());
   }
 
-  const priorities = workflowActive
-    ? lane === "intent"
-      ? ["Continuation Anchor", "User Contract Delta", "Remaining / Immediate Next Actions", "Adjustments / Discoveries", "Current Code / Repository State", "Done"]
-      : ["Evidence Anchor", "Unresolved Risks / Open Questions", "Verification State", "Critical Exact Context", "Important Failures / Wrong Turns"]
-    : lane === "intent"
-      ? ["Current Objective", "User Priorities / Decision State", "Accepted Plan / Scope", "Constraints / Exclusions / User Corrections"]
-      : ["Continuation Anchor", "Remaining / Immediate Next Actions", "Verification State", "Adjustments / Discoveries", "Current Code / Repository State", "Done"];
+  const priorities = lane === "audit"
+    ? [
+        "Active Obligations",
+        "Obligation Status",
+        "Contradictions / Unsupported Claims",
+        "Decisions That Still Matter",
+        "Important Unknowns",
+        "Do-Not-Repeat Knowledge",
+      ]
+    : [
+        "Continuation Anchor",
+        "Remaining / Immediate Next Actions",
+        "Verification State",
+        "Adjustments / Discoveries",
+        "Current Code / Repository State",
+        "Done",
+      ];
 
   const prioritized = priorities.flatMap((heading) => {
     const section = sections.get(heading);
@@ -1034,9 +974,6 @@ export function compactPreviousSummaryForPrompt(
   });
   if (prioritized.length === 0) return clip(source.slice(start, end).trim(), maxChars);
 
-  // Carry the lane in continuation priority rather than source order. In particular,
-  // a long Done/Current-State section must never push the unresolved next action off
-  // the 12k previous-checkpoint budget on a later compaction.
   return clip(prioritized.join("\n\n"), maxChars);
 }
 
@@ -1050,31 +987,20 @@ export function buildLanePrompt(input: PromptBuildInput): string {
   const previous = compactPreviousSummaryForPrompt(
     input.previousSummary,
     input.lane,
-    Boolean(input.deterministic.intentWorkflow),
   );
   if (previous) {
     sections.push(
-      `## Previous LLM checkpoint state (fallible historical state)\nOnly prior LLM continuation/evidence state is carried here. Fresh deterministic evidence below overrides it.\n\n${previous}`,
+      `## Previous LLM checkpoint state (fallible historical state)\nOnly prior state from this same LLM lane is carried here. Fresh deterministic evidence below overrides it.\n\n${previous}`,
     );
   }
 
-  if (input.deterministic.intentWorkflow) {
-    sections.push(
-      `## Active intent-workflow ledger\nThis ledger is re-read from disk for every compaction. It is context, not authority over newer explicit user instructions. The plan body is only a bounded excerpt; the final checkpoint stores its path rather than duplicating the full plan.\n\n${renderIntentWorkflow(input.deterministic.intentWorkflow, {
-        maxChars: input.renderBudgets.intentWorkflowChars,
-        includePlanBody: true,
-        planChars: Math.min(2_500, Math.floor(input.renderBudgets.intentWorkflowChars * 0.35)),
-      })}`,
-    );
-  }
-
-  if (input.lane === "intent" && input.userArtifactCandidates?.trim()) {
+  if (input.lane === "audit" && input.userArtifactCandidates?.trim()) {
     sections.push(`## Oversized human user-source candidates\n${input.userArtifactCandidates.trim()}`);
   }
 
   const deterministic = renderDeterministicState(input.deterministic, input.renderBudgets);
   if (deterministic) {
-    sections.push(`## Fresh deterministic repository/user evidence\nThis block is authoritative where it states direct facts. Newer explicit user messages override older ledger/context state.\n\n${deterministic}`);
+    sections.push(`## Fresh deterministic repository/user evidence\nThis block is authoritative where it states direct facts. Newer explicit user messages and evidence override older generated state.\n\n${deterministic}`);
   }
 
   if (input.isSplitTurn) sections.push(`## Boundary note\n${SPLIT_TURN_NOTE}`);
@@ -1092,10 +1018,10 @@ function h2Section(text: string, heading: string): string | undefined {
   return text.slice(bodyStart, bodyEnd).trim();
 }
 
-export type ContinuationLaneRole = "intent" | "execution" | "implementation" | "evidence";
+export type ContinuationLaneRole = "audit" | "execution";
 
 /**
- * The LLM is instructed to emit a compact continuation/evidence anchor. Keep the
+ * The execution LLM is instructed to emit a compact continuation anchor. Keep the
  * one-round topology robust when a cheap summarizer misses that heading: derive
  * the anchor deterministically from its own remaining/risk section rather than
  * silently publishing a checkpoint with no explicit resume point.
@@ -1110,20 +1036,14 @@ export function protectLaneAnchor(result: LaneResult, role: ContinuationLaneRole
     if (seenHeadings.has(heading)) throw new Error(`${role} lane returned a duplicate checkpoint section: ${heading}`);
     seenHeadings.add(heading);
   }
-  const requiredHeading = role === "evidence"
-    ? "Evidence Anchor"
-    : role === "execution" || role === "implementation"
-      ? "Continuation Anchor"
-      : undefined;
+  const requiredHeading = role === "execution" ? "Continuation Anchor" : undefined;
   if (!requiredHeading || new RegExp(`^## ${requiredHeading}\\s*$`, "m").test(result.text)) return result;
 
-  const source = role === "evidence"
-    ? h2Section(result.text, "Unresolved Risks / Open Questions") ?? h2Section(result.text, "Verification State")
-    : h2Section(result.text, "Remaining / Immediate Next Actions");
+  const source = h2Section(result.text, "Remaining / Immediate Next Actions");
   // Incidental completion language (including "not complete", quoted output,
   // or a completed subtask) cannot establish the state of this lane.
   const body = source?.trim()
-    || "UNKNOWN — the summarizer omitted the required continuation state. Re-check retained recent context and the current user/intent contract before taking a new action.";
+    || "UNKNOWN — the summarizer omitted the required continuation state. Re-check retained recent context, work-state audit, and current user messages before taking a new action.";
   return { ...result, text: `## ${requiredHeading}\n${body}\n\n${result.text.trim()}` };
 }
 
@@ -1336,41 +1256,19 @@ function zeroUsage(): Usage {
 }
 
 export function deterministicMerge(params: {
-  intent: LaneResult;
+  audit: LaneResult;
   execution: LaneResult;
   deterministic: DeterministicState;
   renderBudgets: DeterministicRenderBudgets;
   isSplitTurn: boolean;
 }): string {
   const deterministic = renderDeterministicState(params.deterministic, params.renderBudgets);
-  const workflow = params.deterministic.intentWorkflow;
-
-  if (workflow) {
-    return [
-      "# Compaction Checkpoint",
-      "",
-      "## Durable Intent Workflow",
-      renderIntentWorkflow(workflow, {
-        maxChars: params.renderBudgets.intentWorkflowChars,
-        includePlanBody: false,
-      }),
-      "",
-      "## Implementation State",
-      // LLM lane outputs are deliberately never clipped by deterministic target fitting.
-      params.intent.text.trim(),
-      "",
-      "## Verification / Evidence State",
-      params.execution.text.trim(),
-      ...(deterministic ? ["", "## Deterministic Repository / User State", deterministic] : []),
-      ...(params.isSplitTurn ? ["", "## Split-turn Context", SPLIT_TURN_NOTE] : []),
-    ].join("\n");
-  }
-
   return [
     "# Compaction Checkpoint",
     "",
-    "## Task Semantics",
-    params.intent.text.trim(),
+    "## Work-State Audit",
+    // LLM lane outputs are deliberately never clipped by deterministic target fitting.
+    params.audit.text.trim(),
     "",
     "## Execution State",
     params.execution.text.trim(),
@@ -1381,7 +1279,6 @@ export function deterministicMerge(params: {
 
 function budgetFloors(state: DeterministicState, max: DeterministicRenderBudgets): DeterministicRenderBudgets {
   return {
-    intentWorkflowChars: (state.intentWorkflow || state.pendingIntentReconciliation) ? Math.min(max.intentWorkflowChars, 2_400) : 0,
     gitStateChars: state.git ? Math.min(max.gitStateChars, 800) : 0,
     editedFilesChars: state.traceEditedFiles.length > 0 ? Math.min(max.editedFilesChars, 1_200) : 0,
     readFilesChars: state.traceReadFiles.length > 0 ? Math.min(max.readFilesChars, 240) : 0,
@@ -1399,7 +1296,6 @@ function interpolateBudgets(
 ): DeterministicRenderBudgets {
   const pick = (floor: number, ceiling: number) => floor + Math.floor((ceiling - floor) * fraction);
   return {
-    intentWorkflowChars: pick(floors.intentWorkflowChars, max.intentWorkflowChars),
     gitStateChars: pick(floors.gitStateChars, max.gitStateChars),
     editedFilesChars: pick(floors.editedFilesChars, max.editedFilesChars),
     readFilesChars: pick(floors.readFilesChars, max.readFilesChars),
@@ -1415,7 +1311,7 @@ function interpolateBudgets(
  * targetExceeded rather than destroying the useful checkpoint.
  */
 export function fitCheckpointToTarget(params: {
-  intent: LaneResult;
+  audit: LaneResult;
   execution: LaneResult;
   deterministic: DeterministicState;
   maxRenderBudgets: DeterministicRenderBudgets;
@@ -1429,7 +1325,7 @@ export function fitCheckpointToTarget(params: {
   targetExceeded: boolean;
 } {
   const build = (renderBudgets: DeterministicRenderBudgets) => deterministicMerge({
-    intent: params.intent,
+    audit: params.audit,
     execution: params.execution,
     deterministic: params.deterministic,
     renderBudgets,
@@ -1503,7 +1399,7 @@ export function makeOneRoundDetails(params: {
 }): OneRoundDetails {
   return {
     plugin: "pi-one-round-compaction",
-    version: 5,
+    version: 6,
     lanes: params.laneResults.map((result) => ({
       lane: result.lane,
       model: result.model,
@@ -1531,16 +1427,6 @@ export function makeOneRoundDetails(params: {
     knownUserArtifacts: params.deterministic.knownUserArtifacts ?? (params.deterministic.userArtifacts ?? []).flatMap((artifact) => artifact.sourceSessionId ? [{ id: artifact.id, sourceSessionId: artifact.sourceSessionId }] : [{ id: artifact.id }]),
     durableUserReferences: params.deterministic.durableUserReferences ?? [],
     ...(params.deterministic.git ? { git: params.deterministic.git } : {}),
-    intentWorkflow: params.deterministic.intentWorkflow
-      ? {
-          active: true,
-          workstream: params.deterministic.intentWorkflow.workstream,
-          generation: params.deterministic.intentWorkflow.generation,
-          hasPlan: Boolean(params.deterministic.intentWorkflow.plan),
-          intentTruncated: params.deterministic.intentWorkflow.intentTruncated,
-          planTruncated: params.deterministic.intentWorkflow.planTruncated,
-        }
-      : { active: false },
   };
 }
 

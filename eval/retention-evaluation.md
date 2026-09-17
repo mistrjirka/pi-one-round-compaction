@@ -1,5 +1,7 @@
 # Goal and work-state retention evaluation — 2026-09-13
 
+> This report records experiments from before the v0.4 audit-lane migration. Historical references to the former lane names describe saved results only; current replay tooling uses work-state audit + execution.
+
 Public data exists, but the useful target here is whether a fresh agent can continue the task correctly. Generic summary similarity does not establish that. This audit adds source-linked expected answers for two supplied sessions and checks the complete saved checkpoints against the cron case.
 
 ## Public data and suitability

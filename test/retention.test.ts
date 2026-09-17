@@ -63,7 +63,6 @@ function compactionEvent(branchEntries: CompactionInput["branchEntries"], keepRe
       turnPrefixMessages: [],
       isSplitTurn: false,
       tokensBefore: 100_000,
-      previousSummary: undefined,
       fileOps: { read: new Set<string>(), written: new Set<string>(), edited: new Set<string>() },
       settings: { enabled: true, reserveTokens: 0, keepRecentTokens },
     },

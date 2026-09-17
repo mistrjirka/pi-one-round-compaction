@@ -4,11 +4,6 @@ import type { CompactionResult, ExtensionAPI, ExtensionContext } from "@earendil
 import { Type } from "typebox";
 
 import { DEFAULT_CONFIG, loadConfig, resolveLaneConfig } from "./config.js";
-import {
-  activateIntentWorkflowForSession,
-  detectIntentWorkflow,
-  shouldCarryPreviousCheckpointForIntent,
-} from "./intent-workflow.js";
 import { loadPromptSet } from "./prompt-loader.js";
 import {
   buildLanePrompt,
@@ -23,7 +18,6 @@ import {
   protectLaneAnchor,
   runLane,
   serializeExecutionView,
-  serializeIntentView,
   type DeterministicRenderBudgets,
   type DeterministicState,
   type LaneName,
@@ -219,8 +213,6 @@ function compactAndWait(ctx: ExtensionContext): Promise<CompactionResult> {
 }
 
 export default function oneRoundCompaction(pi: ExtensionAPI): void {
-  const extensionLoadedAtMs = Date.now();
-
   pi.registerTool({
     name: "user_artifact",
     label: "User Artifact",
@@ -373,23 +365,15 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
   pi.on("session_before_compact", async (event, ctx) => {
     let loaded: Awaited<ReturnType<typeof loadConfig>>;
     let promptSet: Awaited<ReturnType<typeof loadPromptSet>>;
-    let intentWorkflow: Awaited<ReturnType<typeof detectIntentWorkflow>>;
     try {
-      [loaded, promptSet, intentWorkflow] = await Promise.all([
+      [loaded, promptSet] = await Promise.all([
         loadConfig(ctx),
         loadPromptSet(ctx),
-        detectIntentWorkflow(ctx.cwd),
       ]);
     } catch (error) {
       ctx.ui.notify(`One-round compaction configuration/prompt error: ${formatError(error)}`, "error");
       return;
     }
-
-    intentWorkflow = activateIntentWorkflowForSession(
-      intentWorkflow,
-      event.branchEntries,
-      extensionLoadedAtMs,
-    );
 
     const { config } = loaded;
     if (!config.enabled) return;
@@ -401,10 +385,9 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       && contentText(entry.message.content, "").length >= config.userArtifactThresholdChars
     );
 
-    const intentLaneConfig = resolveLaneConfig(config, "intent");
+    const auditLaneConfig = resolveLaneConfig(config, "audit");
     const executionLaneConfig = resolveLaneConfig(config, "execution");
     const maxRenderBudgets: DeterministicRenderBudgets = {
-      intentWorkflowChars: (intentWorkflow.active || intentWorkflow.reason === "pending-reconciliation") ? config.intentWorkflowChars : 0,
       gitStateChars: config.includeGitState ? config.gitStateChars : 0,
       editedFilesChars: config.editedFilesChars,
       readFilesChars: config.readFilesChars,
@@ -418,7 +401,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       // Reserve the configured maximum lane outputs up front. Actual outputs are
       // normally much smaller; target fitting after the calls gives the unused
       // room back to deterministic state rather than risking raw-context dominance.
-      laneOutputReserveTokens: intentLaneConfig.maxOutputTokens + executionLaneConfig.maxOutputTokens,
+      laneOutputReserveTokens: auditLaneConfig.maxOutputTokens + executionLaneConfig.maxOutputTokens,
       deterministicReserveChars,
     });
 
@@ -427,9 +410,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       effectiveRecentTokenBudget,
       config.targetPostCompactTokens,
     );
-    const previousSummary = shouldCarryPreviousCheckpointForIntent(event.branchEntries, intentWorkflow)
-      ? boundary.previousSummary
-      : undefined;
+    const previousSummary = boundary.previousSummary;
     const allDiscarded = boundary.messagesToSummarize;
     if (allDiscarded.length === 0) return;
 
@@ -488,21 +469,11 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       userArtifacts: branchArtifacts,
       knownUserArtifacts: knownArtifacts,
       knownUserArtifactIds: knownArtifactIds,
-      ...(intentWorkflow.active ? { intentWorkflow } : {}),
-      ...(!intentWorkflow.active && intentWorkflow.reason === "pending-reconciliation" && intentWorkflow.workstream && intentWorkflow.generation && intentWorkflow.intentPath
-        ? {
-            pendingIntentReconciliation: {
-              workstream: intentWorkflow.workstream,
-              generation: intentWorkflow.generation,
-              intentPath: intentWorkflow.intentPath,
-            },
-          }
-        : {}),
     };
-    const intentPrompt = buildLanePrompt({
-      lane: "intent",
-      lanePrompt: intentWorkflow.active ? promptSet.workflowImplementation : promptSet.intent,
-      serializedConversation: intentWorkflow.active ? executionView : serializeIntentView(allDiscarded),
+    const auditPrompt = buildLanePrompt({
+      lane: "audit",
+      lanePrompt: promptSet.audit,
+      serializedConversation: executionView,
       previousSummary,
       customInstructions: event.customInstructions,
       deterministic: deterministicWithoutGit,
@@ -512,7 +483,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     });
     const executionPrompt = buildLanePrompt({
       lane: "execution",
-      lanePrompt: intentWorkflow.active ? promptSet.workflowEvidence : promptSet.execution,
+      lanePrompt: promptSet.execution,
       serializedConversation: executionView,
       previousSummary,
       customInstructions: event.customInstructions,
@@ -524,7 +495,6 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const progress = createProgressReporter({
       pi,
       ctx,
-      mode: intentWorkflow.active ? "workflow" : "normal",
       reason: event.reason,
       retainedTurns: boundary.retainedTurns,
       estimatedRetainedTokens: boundary.estimatedRetainedTokens,
@@ -532,27 +502,12 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       targetPostCompactTokens: config.targetPostCompactTokens,
       effectiveRecentTokenBudget,
       boundaryMode: boundary.boundaryMode,
-      ...(intentWorkflow.active
-        ? {
-            intentWorkflow: {
-              workstream: intentWorkflow.workstream,
-              hasPlan: Boolean(intentWorkflow.plan),
-            },
-          }
-        : {}),
-      roles: intentWorkflow.active
-        ? { intent: "implementation", execution: "evidence" }
-        : { intent: "intent", execution: "execution" },
+      roles: { audit: "audit", execution: "execution" },
     });
 
     const started = performance.now();
-    const workflowLabel = intentWorkflow.active
-      ? `intent-workflow=${intentWorkflow.workstream}@${intentWorkflow.generation}`
-      : intentWorkflow.reason === "pending-reconciliation"
-        ? `intent-workflow=${intentWorkflow.workstream ?? "unknown"}@${intentWorkflow.generation ?? "?"} PENDING_RECONCILIATION (old contract/checkpoint suppressed)`
-        : `intent-workflow=not detected (${intentWorkflow.reason})`;
     ctx.ui.notify(
-      `One-round compaction: 2 parallel lanes; ${workflowLabel}; target ${config.targetPostCompactTokens.toLocaleString()} tokens; raw recent budget ${effectiveRecentTokenBudget.toLocaleString()} (Pi keepRecentTokens ${event.preparation.settings.keepRecentTokens.toLocaleString()}); retaining ~${boundary.estimatedRetainedTokens.toLocaleString()} tokens (${boundary.boundaryMode})`,
+      `One-round compaction: 2 parallel lanes (work-state audit + execution); target ${config.targetPostCompactTokens.toLocaleString()} tokens; raw recent budget ${effectiveRecentTokenBudget.toLocaleString()} (Pi keepRecentTokens ${event.preparation.settings.keepRecentTokens.toLocaleString()}); retaining ~${boundary.estimatedRetainedTokens.toLocaleString()} tokens (${boundary.boundaryMode})`,
       "info",
     );
 
@@ -564,7 +519,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       try {
         const result = await runLane({
           lane,
-          config: lane === "intent" ? intentLaneConfig : executionLaneConfig,
+          config: lane === "audit" ? auditLaneConfig : executionLaneConfig,
           prompt,
           systemPrompt: promptSet.system,
           ctx,
@@ -585,19 +540,19 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     try {
       // Exactly one LLM round: neither lane consumes the other lane's output.
       // Git inspection is deterministic and runs concurrently with both calls.
-      const [rawIntent, rawExecution, git] = await Promise.all([
-        runTrackedLane("intent", intentPrompt),
+      const [rawAudit, rawExecution, git] = await Promise.all([
+        runTrackedLane("audit", auditPrompt),
         runTrackedLane("execution", executionPrompt),
         config.includeGitState ? collectGitState(ctx.cwd) : Promise.resolve(undefined),
       ]);
-      const intent = protectLaneAnchor(rawIntent, intentWorkflow.active ? "implementation" : "intent");
-      const execution = protectLaneAnchor(rawExecution, intentWorkflow.active ? "evidence" : "execution");
+      const audit = protectLaneAnchor(rawAudit, "audit");
+      const execution = protectLaneAnchor(rawExecution, "execution");
 
       progress.merging();
       const evaluatedReferences = reconcileDurableUserReferences({
         candidates: exposedArtifactCandidates,
         previous: previousBranchReferences.filter((reference) => exposedArtifactKeys.has(userArtifactKey(reference))),
-        llmText: intent.text,
+        llmText: audit.text,
       });
       // A reference that could not fit into this compaction's candidate prompt is
       // not counted as an omission; preserve its lifecycle until the LLM actually
@@ -614,7 +569,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       };
       const wallTimeMs = Math.round(performance.now() - started);
       const fitted = fitCheckpointToTarget({
-        intent,
+        audit,
         execution,
         deterministic,
         maxRenderBudgets,
@@ -625,7 +580,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       const summary = fitted.summary;
       const estimatedTokensAfter = fitted.estimatedTokensAfter;
       const details = makeOneRoundDetails({
-        laneResults: [intent, execution],
+        laneResults: [audit, execution],
         wallTimeMs,
         keepRecentTokens: event.preparation.settings.keepRecentTokens,
         effectiveRecentTokenBudget,
@@ -647,7 +602,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         );
       }
 
-      const usage = combineUsage([intent.usage, execution.usage]);
+      const usage = combineUsage([audit.usage, execution.usage]);
       progress.complete();
       return {
         compaction: {
@@ -693,23 +648,17 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     description: "Show one-round compaction configuration",
     handler: async (_args, ctx) => {
       try {
-        const [{ config, globalPath, projectPath }, promptSet, detectedIntentWorkflow] = await Promise.all([
+        const [{ config, globalPath, projectPath }, promptSet] = await Promise.all([
           loadConfig(ctx),
           loadPromptSet(ctx),
-          detectIntentWorkflow(ctx.cwd),
         ]);
-        const intentWorkflow = activateIntentWorkflowForSession(
-          detectedIntentWorkflow,
-          ctx.sessionManager.getBranch(),
-          extensionLoadedAtMs,
-        );
-        const intent = resolveLaneConfig(config, "intent");
+        const audit = resolveLaneConfig(config, "audit");
         const execution = resolveLaneConfig(config, "execution");
         const lines = [
           `enabled: ${config.enabled}`,
           `global config: ${globalPath}`,
           ...(projectPath ? [`project override: ${projectPath}`] : []),
-          `intent: ${intent.model} thinking=${intent.thinkingLevel} maxOutput=${intent.maxOutputTokens}`,
+          `audit: ${audit.model} thinking=${audit.thinkingLevel} maxOutput=${audit.maxOutputTokens}`,
           `execution: ${execution.model} thinking=${execution.thinkingLevel} maxOutput=${execution.maxOutputTokens}`,
           `toolResultChars: ${config.toolResultChars}`,
           `thinkingChars: ${config.thinkingChars}`,
@@ -717,22 +666,14 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `userMessageChars: ${config.userMessageChars} (per compacted HUMAN user message; synthetic extension/subagent messages excluded)`,
           `userArtifactThresholdChars: ${config.userArtifactThresholdChars} (exact oversized human source archive)`,
           `userArtifactPreviewChars: ${config.userArtifactPreviewChars}`,
-          `userArtifactCandidateChars: ${config.userArtifactCandidateChars} (intent-lane semantic classification budget)`,
+          `userArtifactCandidateChars: ${config.userArtifactCandidateChars} (audit-lane semantic classification budget)`,
           `userArtifactReferenceChars: ${config.userArtifactReferenceChars} (checkpoint active/cooling reference budget)`,
           `targetPostCompactTokens: ${config.targetPostCompactTokens} (soft target; LLM summaries are never clipped)`,
-          `intentWorkflowChars: ${config.intentWorkflowChars}`,
           `gitStateChars: ${config.gitStateChars}`,
           `editedFilesChars: ${config.editedFilesChars}`,
           `readFilesChars: ${config.readFilesChars}`,
           `preflightAutoCompact: ${config.preflightAutoCompact} (projects each idle user prompt against the active model context window)`,
-          intentWorkflow.active
-            ? `intent workflow: ACTIVE workstream=${intentWorkflow.workstream} generation=${intentWorkflow.generation} plan=${Boolean(intentWorkflow.plan)} intentTruncated=${intentWorkflow.intentTruncated} planTruncated=${intentWorkflow.planTruncated}`
-            : intentWorkflow.reason === "pending-reconciliation"
-              ? `intent workflow: PENDING_RECONCILIATION workstream=${intentWorkflow.workstream ?? "unknown"} generation=${intentWorkflow.generation ?? "?"}; old intent contract and previous checkpoint are suppressed until confirmed`
-              : `intent workflow: not detected (${intentWorkflow.reason}); using normal intent+execution lanes`,
-          intentWorkflow.active
-            ? `prompts: system=${promptSet.sources.system}; implementation=${promptSet.sources.workflowImplementation}; evidence=${promptSet.sources.workflowEvidence}`
-            : `prompts: system=${promptSet.sources.system}; intent=${promptSet.sources.intent}; execution=${promptSet.sources.execution}`,
+          `prompts: system=${promptSet.sources.system}; audit=${promptSet.sources.audit}; execution=${promptSet.sources.execution}`,
           "recent-turn budget: balanced against targetPostCompactTokens; oversized newest turns split at safe message boundaries instead of surviving verbatim",
           `fallbackToNative: ${config.fallbackToNative} (false guarantees no sequential LLM fallback)`,
           "LLM topology: 2 calls in parallel, deterministic merge, no LLM follow-up/finalizer",

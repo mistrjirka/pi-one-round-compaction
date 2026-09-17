@@ -449,16 +449,16 @@ function parseReference(value: unknown): DurableUserReference | undefined {
   };
 }
 
-/** Latest v4/v5 compaction carries lifecycle state; v3 is ignored because its user ledger could contain synthetic messages. */
+/** Latest v4+ compaction carries lifecycle state; v3 is ignored because its user ledger could contain synthetic messages. */
 export function previousUserArtifactState(branchEntries: SessionEntry[]): PreviousUserArtifactState {
   for (let i = branchEntries.length - 1; i >= 0; i--) {
     const entry = branchEntries[i]!;
     if (entry.type !== "compaction" || !isObject(entry.details)) continue;
-    if (entry.details.plugin !== "pi-one-round-compaction" || (entry.details.version !== 4 && entry.details.version !== 5)) continue;
+    if (entry.details.plugin !== "pi-one-round-compaction" || (entry.details.version !== 4 && entry.details.version !== 5 && entry.details.version !== 6)) continue;
     const knownIds = Array.isArray(entry.details.knownUserArtifactIds)
       ? entry.details.knownUserArtifactIds.filter((id): id is string => typeof id === "string")
       : [];
-    const knownArtifacts = entry.details.version === 5 && Array.isArray(entry.details.knownUserArtifacts)
+    const knownArtifacts = (entry.details.version === 5 || entry.details.version === 6) && Array.isArray(entry.details.knownUserArtifacts)
       ? entry.details.knownUserArtifacts.flatMap((value) => {
           const parsed = parseLocator(value);
           return parsed ? [parsed] : [];

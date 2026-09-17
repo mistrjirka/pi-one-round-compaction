@@ -6,7 +6,7 @@ import {
   COMPACTION_PROGRESS_EVENT,
   COMPACTION_PROGRESS_STATUS_KEY,
   createProgressReporter,
-  type CompactionProgressV1,
+  type CompactionProgressV2,
 } from "../src/progress.js";
 
 function reporterHarness() {
@@ -36,7 +36,6 @@ function reporterHarness() {
   const reporter = createProgressReporter({
     pi: pi as never,
     ctx: ctx as never,
-    mode: "normal",
     reason: "threshold",
     retainedTurns: 2,
     estimatedRetainedTokens: 1234,
@@ -44,7 +43,7 @@ function reporterHarness() {
     targetPostCompactTokens: 4000,
     effectiveRecentTokenBudget: 1500,
     boundaryMode: "whole-turn",
-    roles: { intent: "intent", execution: "execution" },
+    roles: { audit: "audit", execution: "execution" },
   });
 
   return { reporter, statusCalls, widgetCalls, eventCalls };
@@ -53,9 +52,9 @@ function reporterHarness() {
 test("RPC progress uses vanilla Pi setStatus/setWidget surfaces with structured progress", () => {
   const { reporter, statusCalls, widgetCalls, eventCalls } = reporterHarness();
 
-  reporter.laneStart("intent");
-  reporter.laneDelta("intent", "hello");
-  reporter.laneDone("intent");
+  reporter.laneStart("audit");
+  reporter.laneDelta("audit", "hello");
+  reporter.laneDone("audit");
   reporter.laneStart("execution");
   reporter.laneDelta("execution", "world");
   reporter.laneDone("execution");
@@ -67,16 +66,16 @@ test("RPC progress uses vanilla Pi setStatus/setWidget surfaces with structured 
     .filter((call): call is { key: string; text: string } => typeof call.text === "string")
     .map((call) => {
       assert.equal(call.key, COMPACTION_PROGRESS_STATUS_KEY);
-      return JSON.parse(call.text) as CompactionProgressV1;
+      return JSON.parse(call.text) as CompactionProgressV2;
     });
 
   assert.ok(frames.length >= 5);
-  assert.equal(frames[0]?.v, 1);
+  assert.equal(frames[0]?.v, 2);
   assert.equal(frames[0]?.phase, "preparing");
   assert.ok(frames.some((frame) => frame.phase === "streaming"));
   assert.ok(frames.some((frame) => frame.phase === "merging"));
   assert.ok(frames.some((frame) => frame.phase === "complete"));
-  assert.ok(frames.some((frame) => frame.lanes.intent.delta === "hello"));
+  assert.ok(frames.some((frame) => frame.lanes.audit.delta === "hello"));
   assert.ok(frames.some((frame) => frame.lanes.execution.delta === "world"));
   assert.ok(frames.every((frame) => frame.retainedTurns === 2));
   assert.ok(frames.every((frame) => frame.targetPostCompactTokens === 4000));
@@ -117,7 +116,6 @@ test("progress surfaces are best-effort and can never fail compaction", () => {
     const reporter = createProgressReporter({
       pi: pi as never,
       ctx: ctx as never,
-      mode: "workflow",
       reason: "manual",
       retainedTurns: 1,
       estimatedRetainedTokens: 500,
@@ -125,12 +123,11 @@ test("progress surfaces are best-effort and can never fail compaction", () => {
       targetPostCompactTokens: 3000,
       effectiveRecentTokenBudget: 800,
       boundaryMode: "whole-turn",
-      intentWorkflow: { workstream: "strict-tools", hasPlan: true },
-      roles: { intent: "implementation", execution: "evidence" },
+      roles: { audit: "audit", execution: "execution" },
     });
-    reporter.laneStart("intent");
-    reporter.laneDelta("intent", "partial");
-    reporter.laneDone("intent");
+    reporter.laneStart("audit");
+    reporter.laneDelta("audit", "partial");
+    reporter.laneDone("audit");
     reporter.merging();
     reporter.complete();
     reporter.clear();

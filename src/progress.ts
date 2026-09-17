@@ -4,12 +4,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import type { LaneName } from "./core.js";
 
-export type CompactionMode = "normal" | "workflow";
-export type LaneRole = "intent" | "execution" | "implementation" | "evidence";
+export type LaneRole = "audit" | "execution";
 export type ProgressPhase = "preparing" | "streaming" | "merging" | "complete" | "error" | "aborted";
 export type LaneProgressState = "queued" | "streaming" | "done" | "error";
 
-export interface CompactionProgressLaneV1 {
+export interface CompactionProgressLaneV2 {
   role: LaneRole;
   state: LaneProgressState;
   chars: number;
@@ -18,12 +17,11 @@ export interface CompactionProgressLaneV1 {
   elapsedMs?: number;
 }
 
-export interface CompactionProgressV1 {
-  v: 1;
+export interface CompactionProgressV2 {
+  v: 2;
   runId: string;
   seq: number;
   phase: ProgressPhase;
-  mode: CompactionMode;
   reason: "manual" | "threshold" | "overflow";
   elapsedMs: number;
   retainedTurns: number;
@@ -32,18 +30,13 @@ export interface CompactionProgressV1 {
   targetPostCompactTokens: number;
   effectiveRecentTokenBudget: number;
   boundaryMode: "whole-turn" | "split-turn" | "pi-fallback";
-  intentWorkflow?: {
-    active: true;
-    workstream: string;
-    hasPlan: boolean;
-  };
-  lanes: Record<LaneName, CompactionProgressLaneV1>;
+  lanes: Record<LaneName, CompactionProgressLaneV2>;
   error?: string;
 }
 
 export const COMPACTION_PROGRESS_EVENT = "pi-one-round-compaction:progress";
-export const COMPACTION_PROGRESS_STATUS_KEY = "pi-one-round-compaction.progress.v1";
-export const COMPACTION_PREVIEW_WIDGET_KEY = "pi-one-round-compaction.preview.v1";
+export const COMPACTION_PROGRESS_STATUS_KEY = "pi-one-round-compaction.progress.v2";
+export const COMPACTION_PREVIEW_WIDGET_KEY = "pi-one-round-compaction.preview.v2";
 const MIN_EMIT_INTERVAL_MS = 125;
 const MAX_WIDGET_CHARS_PER_LANE = 8_000;
 const MAX_WIDGET_LINES_PER_LANE = 36;
@@ -100,7 +93,6 @@ function widgetLinesForLane(label: string, lane: LaneMutableState): string[] {
 export function createProgressReporter(params: {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
-  mode: CompactionMode;
   reason: "manual" | "threshold" | "overflow";
   retainedTurns: number;
   estimatedRetainedTokens: number;
@@ -108,7 +100,6 @@ export function createProgressReporter(params: {
   targetPostCompactTokens: number;
   effectiveRecentTokenBudget: number;
   boundaryMode: "whole-turn" | "split-turn" | "pi-fallback";
-  intentWorkflow?: { workstream: string; hasPlan: boolean };
   roles: Record<LaneName, LaneRole>;
 }): ProgressReporter {
   const runId = randomUUID();
@@ -120,13 +111,13 @@ export function createProgressReporter(params: {
   let closed = false;
 
   const lanes: Record<LaneName, LaneMutableState> = {
-    intent: { role: params.roles.intent, state: "queued", text: "", pendingDelta: "" },
+    audit: { role: params.roles.audit, state: "queued", text: "", pendingDelta: "" },
     execution: { role: params.roles.execution, state: "queued", text: "", pendingDelta: "" },
   };
 
-  const buildPayload = (consumeDelta: boolean): CompactionProgressV1 => {
+  const buildPayload = (consumeDelta: boolean): CompactionProgressV2 => {
     const now = Date.now();
-    const lanePayload = (lane: LaneMutableState): CompactionProgressLaneV1 => {
+    const lanePayload = (lane: LaneMutableState): CompactionProgressLaneV2 => {
       const elapsedMs = laneElapsed(now, lane);
       const delta = consumeDelta ? lane.pendingDelta : "";
       return {
@@ -137,12 +128,11 @@ export function createProgressReporter(params: {
         ...(elapsedMs !== undefined ? { elapsedMs } : {}),
       };
     };
-    const payload: CompactionProgressV1 = {
-      v: 1,
+    const payload: CompactionProgressV2 = {
+      v: 2,
       runId,
       seq: seq++,
       phase,
-      mode: params.mode,
       reason: params.reason,
       elapsedMs: Math.max(0, now - startedAt),
       retainedTurns: params.retainedTurns,
@@ -151,33 +141,23 @@ export function createProgressReporter(params: {
       targetPostCompactTokens: params.targetPostCompactTokens,
       effectiveRecentTokenBudget: params.effectiveRecentTokenBudget,
       boundaryMode: params.boundaryMode,
-      ...(params.intentWorkflow
-        ? {
-            intentWorkflow: {
-              active: true as const,
-              workstream: params.intentWorkflow.workstream,
-              hasPlan: params.intentWorkflow.hasPlan,
-            },
-          }
-        : {}),
       lanes: {
-        intent: lanePayload(lanes.intent),
+        audit: lanePayload(lanes.audit),
         execution: lanePayload(lanes.execution),
       },
       ...(terminalError ? { error: terminalError } : {}),
     };
     if (consumeDelta) {
-      lanes.intent.pendingDelta = "";
+      lanes.audit.pendingDelta = "";
       lanes.execution.pendingDelta = "";
     }
     return payload;
   };
 
   const renderWidget = (): string[] => {
-    const modeLabel = params.mode === "workflow" ? "intent workflow" : "normal";
     return [
-      `Compaction · ${modeLabel} · ${phase} · ${Math.max(0, Date.now() - startedAt)}ms`,
-      ...widgetLinesForLane(lanes.intent.role, lanes.intent),
+      `Compaction · ${phase} · ${Math.max(0, Date.now() - startedAt)}ms`,
+      ...widgetLinesForLane(lanes.audit.role, lanes.audit),
       "",
       ...widgetLinesForLane(lanes.execution.role, lanes.execution),
     ];
@@ -208,7 +188,7 @@ export function createProgressReporter(params: {
     if (params.ctx.mode === "rpc") {
       bestEffort(() => params.ctx.ui.setStatus(COMPACTION_PROGRESS_STATUS_KEY, JSON.stringify(payload)));
     } else {
-      const a = payload.lanes.intent;
+      const a = payload.lanes.audit;
       const b = payload.lanes.execution;
       bestEffort(() =>
         params.ctx.ui.setStatus(

@@ -103,7 +103,10 @@ function prepareBudgetedUnderfillSplit(
 
   let cutIndex = cutPoints[cutPoints.length - 1]!;
   for (const candidate of cutPoints) {
-    if (candidate >= thresholdIndex) {
+    // Cutting exactly at the prior compaction boundary can summarize zero
+    // messages. Skip that zero-progress choice and use the next provider-safe
+    // boundary rather than giving up on underfill recovery entirely.
+    if (candidate >= thresholdIndex && candidate > boundaryStart) {
       cutIndex = candidate;
       break;
     }

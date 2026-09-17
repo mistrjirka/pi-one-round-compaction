@@ -26,7 +26,6 @@ export interface OneRoundCompactionConfig {
   userArtifactCandidateChars: number;
   userArtifactReferenceChars: number;
   targetPostCompactTokens: number;
-  intentWorkflowChars: number;
   gitStateChars: number;
   editedFilesChars: number;
   readFilesChars: number;
@@ -34,7 +33,7 @@ export interface OneRoundCompactionConfig {
   preflightAutoCompact: boolean;
   fallbackToNative: boolean;
   lanes: {
-    intent: LaneConfig;
+    audit: LaneConfig;
     execution: LaneConfig;
   };
 }
@@ -53,7 +52,6 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   userArtifactCandidateChars: 12000,
   userArtifactReferenceChars: 4000,
   targetPostCompactTokens: 40000,
-  intentWorkflowChars: 8000,
   gitStateChars: 4000,
   editedFilesChars: 6000,
   readFilesChars: 1000,
@@ -61,7 +59,7 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   preflightAutoCompact: true,
   fallbackToNative: false,
   lanes: {
-    intent: { thinkingLevel: "medium", maxOutputTokens: 3072 },
+    audit: { thinkingLevel: "medium", maxOutputTokens: 3072 },
     execution: {},
   },
 };
@@ -146,7 +144,6 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     "userArtifactCandidateChars",
     "userArtifactReferenceChars",
     "targetPostCompactTokens",
-    "intentWorkflowChars",
     "gitStateChars",
     "editedFilesChars",
     "readFilesChars",
@@ -162,12 +159,12 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
   let lanes = base.lanes;
   if (value.lanes !== undefined) {
     if (!isObject(value.lanes)) throw new Error("lanes must be an object");
-    const laneKeys = new Set(["intent", "execution"]);
+    const laneKeys = new Set(["audit", "execution"]);
     for (const actual of Object.keys(value.lanes)) {
       if (!laneKeys.has(actual)) throw new Error(`Unknown lanes key: ${actual}`);
     }
     lanes = {
-      intent: { ...base.lanes.intent, ...parseLane(value.lanes.intent, "lanes.intent") },
+      audit: { ...base.lanes.audit, ...parseLane(value.lanes.audit, "lanes.audit") },
       execution: { ...base.lanes.execution, ...parseLane(value.lanes.execution, "lanes.execution") },
     };
   }
@@ -186,7 +183,6 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     userArtifactCandidateChars: parsePositiveInt(value.userArtifactCandidateChars, "userArtifactCandidateChars", base.userArtifactCandidateChars),
     userArtifactReferenceChars: parsePositiveInt(value.userArtifactReferenceChars, "userArtifactReferenceChars", base.userArtifactReferenceChars),
     targetPostCompactTokens: parsePositiveInt(value.targetPostCompactTokens, "targetPostCompactTokens", base.targetPostCompactTokens),
-    intentWorkflowChars: parsePositiveInt(value.intentWorkflowChars, "intentWorkflowChars", base.intentWorkflowChars),
     gitStateChars: parseNonNegativeInt(value.gitStateChars, "gitStateChars", base.gitStateChars),
     editedFilesChars: parseNonNegativeInt(value.editedFilesChars, "editedFilesChars", base.editedFilesChars),
     readFilesChars: parseNonNegativeInt(value.readFilesChars, "readFilesChars", base.readFilesChars),
@@ -233,7 +229,7 @@ export async function loadConfig(ctx: Pick<ExtensionContext, "cwd" | "isProjectT
   };
 }
 
-export function resolveLaneConfig(config: OneRoundCompactionConfig, lane: "intent" | "execution") {
+export function resolveLaneConfig(config: OneRoundCompactionConfig, lane: "audit" | "execution") {
   const override = config.lanes[lane];
   return {
     model: override.model ?? config.model,

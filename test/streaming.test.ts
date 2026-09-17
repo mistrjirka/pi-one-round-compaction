@@ -72,7 +72,7 @@ test("runLane observes provider text deltas when vanilla Pi exposes provider/aut
   };
 
   const result = await runLane({
-    lane: "intent",
+    lane: "audit",
     config: laneConfig,
     prompt: "checkpoint",
     systemPrompt: "system",

@@ -14,7 +14,6 @@ import {
   prepareWholeTurnCompaction,
   protectLaneAnchor,
   serializeExecutionView,
-  serializeIntentView,
   type DeterministicState,
   type LaneResult,
 } from "../src/core.js";
@@ -61,67 +60,6 @@ function compactionEvent(branchEntries: unknown[], keepRecentTokens: number, nat
     },
   } as never;
 }
-
-test("intent view omits tool results and keeps user semantics", () => {
-  const messages = [
-    user("Implement the accepted plan, but do not change UI."),
-    assistant("I will inspect the backend."),
-    {
-      role: "toolResult" as const,
-      toolCallId: "1",
-      toolName: "read",
-      content: [{ type: "text" as const, text: "huge implementation detail" }],
-      isError: false,
-      timestamp: Date.now(),
-    },
-  ];
-  const text = serializeIntentView(messages);
-  assert.match(text, /Implement the accepted plan/);
-  assert.doesNotMatch(text, /huge implementation detail/);
-});
-
-test("intent view excludes synthetic extension messages even though Pi maps them to LLM user role", () => {
-  const messages = [
-    user("real user requirement"),
-    {
-      role: "custom" as const,
-      customType: "pi-subagents",
-      content: "Background task completed: synthetic status",
-      display: true,
-      timestamp: Date.now(),
-    },
-    assistant("working"),
-  ];
-  const text = serializeIntentView(messages as never);
-  assert.match(text, /real user requirement/);
-  assert.doesNotMatch(text, /Background task completed/);
-});
-
-test("intent view keeps generated branch summaries as explicitly non-authoritative semantic evidence", () => {
-  const messages = [
-    user("yes, keep that behavior"),
-    {
-      role: "branchSummary" as const,
-      summary: "The immediately preceding accepted proposal was to keep old reviews on the legacy UI and upgrade on rerun.",
-      timestamp: Date.now(),
-    },
-  ];
-  const text = serializeIntentView(messages as never);
-  assert.match(text, /yes, keep that behavior/);
-  assert.match(text, /Generated prior summary evidence — not user authority/);
-  assert.match(text, /keep old reviews on the legacy UI/);
-});
-
-test("intent view keeps both ends of a long assistant proposal so short user acceptance remains interpretable", () => {
-  const messages = [
-    assistant(`Proposal start: ${"middle ".repeat(900)} FINAL DECISION: rerun upgrades the legacy review.`),
-    user("yes"),
-  ];
-  const text = serializeIntentView(messages);
-  assert.match(text, /Proposal start/);
-  assert.match(text, /FINAL DECISION: rerun upgrades the legacy review/);
-  assert.match(text, /\[User\]: yes/);
-});
 
 test("execution view labels and truncates extension messages as evidence rather than user input", () => {
   const messages = [{
@@ -409,9 +347,9 @@ test("file state restores previous extension details cumulatively", () => {
 
 test("deterministic merge keeps lane domains separate and appends state", () => {
   const usage = emptyUsageForTests();
-  const intent: LaneResult = {
-    lane: "intent",
-    text: "## Current Objective\nShip strict tools",
+  const audit: LaneResult = {
+    lane: "audit",
+    text: "## Active Obligations\n- Ship strict tools",
     usage,
     model: "p/m",
     thinkingLevel: "low",
@@ -433,11 +371,10 @@ test("deterministic merge keeps lane domains separate and appends state", () => 
     traceEditedFiles: ["api/a.ts"],
   };
   const text = deterministicMerge({
-    intent,
+    audit,
     execution,
     deterministic,
     renderBudgets: {
-      intentWorkflowChars: 0,
       gitStateChars: 0,
       editedFilesChars: 2000,
       readFilesChars: 0,
@@ -447,42 +384,10 @@ test("deterministic merge keeps lane domains separate and appends state", () => 
     isSplitTurn: false,
   });
   assert.match(text, /# Compaction Checkpoint/);
-  assert.match(text, /## Task Semantics/);
+  assert.match(text, /## Work-State Audit/);
   assert.match(text, /## Execution State/);
   assert.match(text, /Do not touch UI/);
   assert.match(text, /api\/a\.ts/);
-});
-
-test("pending intent reconciliation renders a deterministic post-compaction reminder", () => {
-  const usage = emptyUsageForTests();
-  const intent: LaneResult = {
-    lane: "intent", text: "## Current Objective\nUse the new request", usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
-  };
-  const execution: LaneResult = {
-    lane: "execution", text: "## Continuation Anchor\nReconcile intent before implementation", usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
-  };
-  const deterministic: DeterministicState = {
-    userMessages: [], readFiles: [], modifiedFiles: [], traceReadFiles: [], traceEditedFiles: [],
-    pendingIntentReconciliation: {
-      workstream: "issue-993-summary",
-      generation: 3,
-      intentPath: "/tmp/pi-work/issue-993-summary/intent.md",
-    },
-  };
-  const text = deterministicMerge({
-    intent,
-    execution,
-    deterministic,
-    renderBudgets: {
-      intentWorkflowChars: 2400, gitStateChars: 0, editedFilesChars: 0, readFilesChars: 0,
-      userMessagesChars: 0, userArtifactReferencesChars: 0,
-    },
-    isSplitTurn: false,
-  });
-  assert.match(text, /Intent reconciliation required/);
-  assert.match(text, /PENDING_RECONCILIATION/);
-  assert.match(text, /issue-993-summary/);
-  assert.match(text, /previous durable intent contract and previous-generation checkpoint were intentionally suppressed/);
 });
 
 test("post-compaction target reserves room for summaries and deterministic categories", () => {
@@ -575,40 +480,88 @@ test("cumulative user ledger excludes custom/subagent notifications converted to
   assert.doesNotMatch(ledger.map((entry) => entry.text).join("\n"), /Background task|Subagent progress/);
 });
 
-test("previous checkpoint prompt carry-forward drops stale deterministic copies", () => {
+test("previous checkpoint carry-forward keeps audit obligations and drops execution state", () => {
   const prior = `# Compaction Checkpoint
 
-## Durable Intent Workflow
-old git-like durable state
+## Work-State Audit
+## Active Obligations
+- FETCHER-VALIDATION remains OPEN.
 
-## Implementation State
+## Obligation Status
+- FETCHER-VALIDATION — OPEN; accepted earlier and no completion evidence exists.
+
+## Decisions That Still Matter
+- The user already approved this work.
+
+## Contradictions / Unsupported Claims
+- A prior completion claim omitted FETCHER-VALIDATION.
+
+## Do-Not-Repeat Knowledge
+- Do not ask for approval again.
+
+## Important Unknowns
+- None
+
+## Execution State
+## Continuation Anchor
+- Run focused validation.
+
 ## Done
-- useful prior implementation
+- notification cleanup
 
-## Verification / Evidence State
-## Verification State
-- tests pass
-
-## Deterministic Repository / User State
-HEAD: stale
-user: stale`;
-  const implementation = compactPreviousSummaryForPrompt(prior, "intent", true);
-  const evidence = compactPreviousSummaryForPrompt(prior, "execution", true);
-  assert.match(implementation ?? "", /useful prior implementation/);
-  assert.doesNotMatch(implementation ?? "", /tests pass/);
-  assert.match(evidence ?? "", /tests pass/);
-  assert.doesNotMatch(evidence ?? "", /useful prior implementation/);
-  assert.doesNotMatch(implementation ?? "", /old git-like durable state/);
-  assert.doesNotMatch(evidence ?? "", /HEAD: stale/);
+## Deterministic State
+HEAD: stale`;
+  const audit = compactPreviousSummaryForPrompt(prior, "audit", 2_000);
+  const execution = compactPreviousSummaryForPrompt(prior, "execution", 2_000);
+  assert.match(audit ?? "", /FETCHER-VALIDATION/);
+  assert.match(audit ?? "", /already approved/);
+  assert.doesNotMatch(audit ?? "", /notification cleanup/);
+  assert.match(execution ?? "", /Run focused validation/);
+  assert.doesNotMatch(execution ?? "", /FETCHER-VALIDATION/);
+  assert.doesNotMatch(execution ?? "", /HEAD: stale/);
 });
 
-test("previous checkpoint carry-forward protects the next action from long implementation history", () => {
+test("previous audit carry-forward prioritizes contradictions and active obligations over long history", () => {
   const prior = `# Compaction Checkpoint
 
-## Durable Intent Workflow
-current contract
+## Work-State Audit
+## Active Obligations
+- SERVICE-GETTER remains OPEN.
 
-## Implementation State
+## Obligation Status
+- SERVICE-GETTER — OPEN.
+
+## Decisions That Still Matter
+- Approved earlier.
+
+## Contradictions / Unsupported Claims
+- COMPLETE is unsupported because SERVICE-GETTER disappeared without completion evidence.
+
+## Do-Not-Repeat Knowledge
+${"old-history ".repeat(1800)}
+
+## Important Unknowns
+- None
+
+## Execution State
+## Done
+- unrelated`;
+  const carried = compactPreviousSummaryForPrompt(prior, "audit", 2_000);
+  assert.match(carried ?? "", /SERVICE-GETTER/);
+  assert.match(carried ?? "", /COMPLETE is unsupported/);
+  const contradiction = (carried ?? "").indexOf("COMPLETE is unsupported");
+  const oldHistory = (carried ?? "").indexOf("old-history");
+  assert.ok(oldHistory === -1 || contradiction < oldHistory);
+});
+
+test("previous execution carry-forward protects next action from long history", () => {
+  const prior = `# Compaction Checkpoint
+
+## Work-State Audit
+## Active Obligations
+- implementation
+
+## Execution State
 ## Done
 ${"old-history ".repeat(1800)}
 
@@ -622,14 +575,12 @@ ${"current-state ".repeat(400)}
 - DELETE-LEGACY-CONSOLIDATION is the immediate next action.
 - Then run the focused verification suite.
 
-## Verification / Evidence State
 ## Verification State
 - tests pending
 
-## Deterministic Repository / User State
+## Deterministic State
 HEAD: fresh`;
-
-  const carried = compactPreviousSummaryForPrompt(prior, "intent", true, 4_000);
+  const carried = compactPreviousSummaryForPrompt(prior, "execution", 4_000);
   assert.match(carried ?? "", /DELETE-LEGACY-CONSOLIDATION/);
   assert.match(carried ?? "", /Do not retry the failed fallback writer/);
   const nextActionIndex = (carried ?? "").indexOf("DELETE-LEGACY-CONSOLIDATION");
@@ -638,90 +589,10 @@ HEAD: fresh`;
   assert.ok((carried?.length ?? 0) <= 4_100);
 });
 
-test("previous normal intent carry-forward protects user priority and decision state", () => {
-  const prior = `# Compaction Checkpoint
-
-## Task Semantics
-## Current Objective
-Improve compaction continuity.
-
-## Accepted Plan / Scope
-- Keep two lanes.
-
-## User Priorities / Decision State
-- The user explicitly says preserving the plot after compaction is the major issue.
-
-## Constraints / Exclusions / User Corrections
-- Do not add an arbitrary 160k ceiling.
-
-## Execution State
-## Done
-- none`;
-  const carried = compactPreviousSummaryForPrompt(prior, "intent", false, 2_000);
-  assert.match(carried ?? "", /preserving the plot after compaction is the major issue/);
-  assert.match(carried ?? "", /Do not add an arbitrary 160k ceiling/);
-});
-
-test("previous workflow implementation carry-forward protects unreconciled user contract delta", () => {
-  const prior = `# Compaction Checkpoint
-
-## Durable Intent Workflow
-old ledger
-
-## Implementation State
-## Continuation Anchor
-- reconcile user correction
-
-## User Contract Delta
-RECONCILIATION REQUIRED: keep old reviews on legacy UI until rerun.
-
-## Done
-${"history ".repeat(2000)}
-
-## Verification / Evidence State
-## Evidence Anchor
-COMPLETE`;
-  const carried = compactPreviousSummaryForPrompt(prior, "intent", true, 2_000);
-  assert.match(carried ?? "", /RECONCILIATION REQUIRED/);
-  assert.match(carried ?? "", /keep old reviews on legacy UI until rerun/);
-});
-
-test("previous evidence carry-forward protects unresolved risk from long verification chronology", () => {
-  const prior = `# Compaction Checkpoint
-
-## Durable Intent Workflow
-current contract
-
-## Implementation State
-## Done
-- implementation complete
-
-## Verification / Evidence State
-## Verification State
-${"old-pass ".repeat(1800)}
-
-## Important Failures / Wrong Turns
-- old failure
-
-## Unresolved Risks / Open Questions
-- FIREFOX-LEGACY-RERUN is still NOT RUN and can block completion.
-
-## Critical Exact Context
-- exact detail
-
-## Deterministic Repository / User State
-HEAD: fresh`;
-
-  const carried = compactPreviousSummaryForPrompt(prior, "execution", true, 3_000);
-  assert.match(carried ?? "", /FIREFOX-LEGACY-RERUN/);
-  assert.ok((carried ?? "").indexOf("FIREFOX-LEGACY-RERUN") < (carried ?? "").indexOf("old-pass"));
-  assert.ok((carried?.length ?? 0) <= 3_100);
-});
-
 test("target fitting preserves both LLM summaries and balances deterministic categories", () => {
   const usage = emptyUsageForTests();
-  const intent: LaneResult = {
-    lane: "intent", text: `## Done\n${"I".repeat(2500)}`, usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
+  const audit: LaneResult = {
+    lane: "audit", text: `## Active Obligations\n${"A".repeat(2500)}`, usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
   };
   const execution: LaneResult = {
     lane: "execution", text: `## Verification State\n${"E".repeat(2500)}`, usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
@@ -740,11 +611,10 @@ test("target fitting preserves both LLM summaries and balances deterministic cat
     git: { root: "/repo", branch: "main", head: "abc", dirty: [" M a.ts"], truncated: false },
   };
   const fitted = fitCheckpointToTarget({
-    intent,
+    audit,
     execution,
     deterministic,
     maxRenderBudgets: {
-      intentWorkflowChars: 0,
       gitStateChars: 4000,
       editedFilesChars: 6000,
       readFilesChars: 1000,
@@ -755,7 +625,7 @@ test("target fitting preserves both LLM summaries and balances deterministic cat
     estimatedRetainedTokens: 6_000,
     targetPostCompactTokens: 9_000,
   });
-  assert.ok(fitted.summary.includes(intent.text));
+  assert.ok(fitted.summary.includes(audit.text));
   assert.ok(fitted.summary.includes(execution.text));
   assert.match(fitted.summary, /Git state/);
   assert.match(fitted.summary, /Files edited\/written/);
@@ -802,8 +672,8 @@ test("40k target collapses a roughly 150k-token tool-heavy turn without clipping
   assert.ok(boundary.estimatedRetainedTokens <= 20_000);
 
   const usage = emptyUsageForTests();
-  const intent: LaneResult = {
-    lane: "intent", text: `## Done\n${"I".repeat(5_500)}`, usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
+  const audit: LaneResult = {
+    lane: "audit", text: `## Active Obligations\n${"A".repeat(5_500)}`, usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
   };
   const execution: LaneResult = {
     lane: "execution", text: `## Verification State\n${"E".repeat(5_500)}`, usage, model: "p/m", thinkingLevel: "low", durationMs: 1,
@@ -822,11 +692,10 @@ test("40k target collapses a roughly 150k-token tool-heavy turn without clipping
     git: { root: "/repo", branch: "main", head: "abcdef123456", dirty: [" M src/changed.ts"], truncated: false },
   };
   const fitted = fitCheckpointToTarget({
-    intent,
+    audit,
     execution,
     deterministic,
     maxRenderBudgets: {
-      intentWorkflowChars: 0,
       gitStateChars: 4_000,
       editedFilesChars: 6_000,
       readFilesChars: 1_000,
@@ -837,7 +706,7 @@ test("40k target collapses a roughly 150k-token tool-heavy turn without clipping
     estimatedRetainedTokens: boundary.estimatedRetainedTokens,
     targetPostCompactTokens: 40_000,
   });
-  assert.ok(fitted.summary.includes(intent.text));
+  assert.ok(fitted.summary.includes(audit.text));
   assert.ok(fitted.summary.includes(execution.text));
   assert.ok(fitted.estimatedTokensAfter <= 40_000);
   assert.equal(fitted.targetExceeded, false);
@@ -846,27 +715,27 @@ test("40k target collapses a roughly 150k-token tool-heavy turn without clipping
 test("missing continuation heading is deterministically recovered from remaining actions", () => {
   const usage = emptyUsageForTests();
   const protectedResult = protectLaneAnchor({
-    lane: "intent",
+    lane: "execution",
     text: "## Done\n- lots of history\n\n## Remaining / Immediate Next Actions\n- Resume run run-123 and verify lifecycle transition.",
     usage,
     model: "p/m",
     thinkingLevel: "low",
     durationMs: 1,
-  }, "implementation");
+  }, "execution");
   assert.match(protectedResult.text, /^## Continuation Anchor\n- Resume run run-123/m);
 });
 
-test("missing evidence heading is deterministically recovered from unresolved risks", () => {
+test("audit lane does not invent a continuation anchor", () => {
   const usage = emptyUsageForTests();
-  const protectedResult = protectLaneAnchor({
-    lane: "execution",
-    text: "## Verification State\n- unit tests PASS\n\n## Unresolved Risks / Open Questions\n- Firefox legacy rerun is NOT RUN.",
+  const result = protectLaneAnchor({
+    lane: "audit",
+    text: "## Active Obligations\n- verification remains OPEN",
     usage,
     model: "p/m",
     thinkingLevel: "low",
     durationMs: 1,
-  }, "evidence");
-  assert.match(protectedResult.text, /^## Evidence Anchor\n- Firefox legacy rerun is NOT RUN/m);
+  }, "audit");
+  assert.doesNotMatch(result.text, /Continuation Anchor/);
 });
 
 test("model references allow slashes only after provider delimiter", () => {

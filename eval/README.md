@@ -1,5 +1,7 @@
 # Compaction replay experiment, 2026-09-13
 
+> `eval/replay.mjs` now exercises the v0.4 work-state-audit + execution topology. Saved result files and older narrative below were produced by earlier revisions and retain their historical lane names; they are evidence, not active runtime support.
+
 This is a conversation-replay experiment, not a native Pi installation or task execution benchmark. Archived OpenCode messages are normalized into Pi-compatible user, assistant and tool-result messages. Tool calls from the archive are data and are never executed.
 
 ## Reproduce
