@@ -6,6 +6,7 @@ import {
   collectUserMessageLedger,
   compactPreviousSummaryForPrompt,
   computeEffectiveRecentTokenBudget,
+  computeLaneOutputTokenBudget,
   deterministicMerge,
   emptyUsageForTests,
   extractRecentUserContext,
@@ -390,13 +391,23 @@ test("deterministic merge keeps lane domains separate and appends state", () => 
   assert.match(text, /api\/a\.ts/);
 });
 
-test("post-compaction target reserves room for summaries and deterministic categories", () => {
+test("post-compaction raw budget reserves deterministic and structural checkpoint room", () => {
   assert.equal(computeEffectiveRecentTokenBudget({
     targetPostCompactTokens: 40_000,
     keepRecentTokens: 32_000,
-    laneOutputReserveTokens: 9_216,
     deterministicReserveChars: 35_000,
-  }), 21_034);
+  }), 30_250);
+});
+
+test("lane output budget is derived from the current checkpoint room", () => {
+  assert.equal(computeLaneOutputTokenBudget({
+    targetPostCompactTokens: 40_000,
+    estimatedRetainedTokens: 20_000,
+  }), 19_000);
+  assert.equal(computeLaneOutputTokenBudget({
+    targetPostCompactTokens: 40_000,
+    estimatedRetainedTokens: 32_000,
+  }), 7_000);
 });
 
 test("cumulative user ledger spans earlier compaction boundaries and caps each message", () => {
@@ -519,6 +530,80 @@ HEAD: stale`;
   assert.match(execution ?? "", /Run focused validation/);
   assert.doesNotMatch(execution ?? "", /FETCHER-VALIDATION/);
   assert.doesNotMatch(execution ?? "", /HEAD: stale/);
+});
+
+test("v5 task-semantics checkpoint is translated into neutral audit migration evidence", () => {
+  const prior = `# Compaction Checkpoint
+
+## Task Semantics
+## Current Objective
+- Finish PR #59.
+
+## Accepted Plan / Scope
+- Fix the pool race and validation.
+
+## User Priorities / Decision State
+- Already approved; do not ask again.
+
+## Constraints / Exclusions / User Corrections
+- Do not touch unrelated formatting.
+
+## Execution State
+## Continuation Anchor
+- Run the focused tests.
+
+## Remaining / Immediate Next Actions
+1. Run tests.`;
+
+  const audit = compactPreviousSummaryForPrompt(prior, "audit", 4_000);
+  const execution = compactPreviousSummaryForPrompt(prior, "execution", 4_000);
+  assert.match(audit ?? "", /Previous checkpoint migration evidence/);
+  assert.match(audit ?? "", /Fix the pool race and validation/);
+  assert.match(audit ?? "", /Already approved; do not ask again/);
+  assert.doesNotMatch(audit ?? "", /^## Task Semantics$/m);
+  assert.doesNotMatch(audit ?? "", /Run the focused tests/);
+  assert.match(execution ?? "", /Run the focused tests/);
+});
+
+test("native Pi checkpoint is split into audit and execution migration evidence", () => {
+  const prior = `## Goal
+- Publish the formatting cleanup PR.
+
+## Constraints & Preferences
+- Formatting/config only; no behavior changes.
+
+## Progress
+### Done
+- Oxfmt passes.
+### In Progress
+- Regression tests.
+
+## Key Decisions
+- Keep Oxfmt as the canonical formatter.
+
+## Next Steps
+1. Finish targeted tests.
+2. Push the PR.
+
+## Critical Context
+- Branch chore/format-baseline.`;
+
+  const audit = compactPreviousSummaryForPrompt(prior, "audit", 4_000);
+  const execution = compactPreviousSummaryForPrompt(prior, "execution", 4_000);
+  assert.match(audit ?? "", /Publish the formatting cleanup PR/);
+  assert.match(audit ?? "", /Formatting\/config only/);
+  assert.match(audit ?? "", /canonical formatter/);
+  assert.doesNotMatch(audit ?? "", /Finish targeted tests/);
+  assert.match(execution ?? "", /Oxfmt passes/);
+  assert.match(execution ?? "", /Finish targeted tests/);
+  assert.match(execution ?? "", /chore\/format-baseline/);
+  assert.doesNotMatch(execution ?? "", /canonical formatter/);
+});
+
+test("unknown previous summary shape is not replayed wholesale", () => {
+  const prior = "## Random Legacy Wrapper\nThis should not become authoritative context.";
+  assert.equal(compactPreviousSummaryForPrompt(prior, "audit"), undefined);
+  assert.equal(compactPreviousSummaryForPrompt(prior, "execution"), undefined);
 });
 
 test("previous audit carry-forward prioritizes contradictions and active obligations over long history", () => {

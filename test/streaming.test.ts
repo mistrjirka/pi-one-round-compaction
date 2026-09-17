@@ -32,7 +32,6 @@ function finalMessage(text: string, responseModel = model) {
 const laneConfig = {
   model: `${model.provider}/${model.id}`,
   thinkingLevel: "low" as const,
-  maxOutputTokens: 2048,
 };
 
 test("runLane observes provider text deltas when vanilla Pi exposes provider/auth accessors", async () => {
@@ -74,6 +73,7 @@ test("runLane observes provider text deltas when vanilla Pi exposes provider/aut
   const result = await runLane({
     lane: "audit",
     config: laneConfig,
+    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -105,6 +105,7 @@ test("runLane falls back to ModelRegistry.complete when streaming accessors are 
   const result = await runLane({
     lane: "execution",
     config: laneConfig,
+    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -168,6 +169,7 @@ test("runLane sends OpenCode session routing headers through direct provider str
   await runLane({
     lane: "execution",
     config: { ...laneConfig, model: `${openCodeModel.provider}/${openCodeModel.id}` },
+    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -213,6 +215,7 @@ test("runLane sends OpenCode session routing headers through ModelRegistry.compl
   await runLane({
     lane: "execution",
     config: { ...laneConfig, model: `${openCodeModel.provider}/${openCodeModel.id}` },
+    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -223,4 +226,33 @@ test("runLane sends OpenCode session routing headers through ModelRegistry.compl
   assert.ok(completionOptions.sessionId);
   assert.equal(completionOptions.headers?.["x-opencode-session"], completionOptions.sessionId);
   assert.equal(completionOptions.headers?.["x-opencode-client"], "pi");
+});
+
+test("runLane derives request maxTokens from the per-run checkpoint budget and provider maximum", async () => {
+  const seen: number[] = [];
+  const ctx = {
+    modelRegistry: {
+      find(providerId: string, modelId: string) {
+        return providerId === model.provider && modelId === model.id ? model : undefined;
+      },
+      async complete(_model: unknown, _context: unknown, options: { maxTokens?: number }) {
+        seen.push(options.maxTokens ?? -1);
+        return finalMessage("budgeted checkpoint");
+      },
+    },
+  };
+
+  for (const outputBudgetTokens of [1500, 10_000]) {
+    await runLane({
+      lane: "execution",
+      config: laneConfig,
+      outputBudgetTokens,
+      prompt: "checkpoint",
+      systemPrompt: "system",
+      ctx: ctx as never,
+      signal: new AbortController().signal,
+    });
+  }
+
+  assert.deepEqual(seen, [1500, model.maxTokens]);
 });

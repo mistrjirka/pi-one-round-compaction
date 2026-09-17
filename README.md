@@ -96,7 +96,6 @@ Example:
 {
   "model": "opencode-go/muse-spark-1.2-contributor",
   "thinkingLevel": "low",
-  "maxOutputTokens": 6144,
   "targetPostCompactTokens": 40000,
   "toolResultChars": 2000,
   "recentControlChars": 16000,
@@ -105,8 +104,7 @@ Example:
   "fallbackToNative": false,
   "lanes": {
     "audit": {
-      "thinkingLevel": "medium",
-      "maxOutputTokens": 3072
+      "thinkingLevel": "medium"
     },
     "execution": {
       "thinkingLevel": "low"
@@ -115,13 +113,13 @@ Example:
 }
 ```
 
-The audit lane defaults to medium thinking; execution defaults to low. Each lane can independently override `model`, `thinkingLevel`, and `maxOutputTokens`.
+The audit lane defaults to medium thinking; execution defaults to low. Each lane can independently override only `model` and `thinkingLevel`. There is no configurable or fixed per-lane output-token limit.
 
 Important defaults:
 
 | Setting | Default | Purpose |
 |---|---:|---|
-| `targetPostCompactTokens` | 40000 | Soft total target after compaction |
+| `targetPostCompactTokens` | 40000 | Soft total target after compaction; also drives the per-run LLM output budget |
 | `toolResultChars` | 2000 | Base retained chars per older tool result |
 | `thinkingChars` | 0 | Older assistant-thinking retention |
 | `recentControlChars` | 16000 | Cumulative compacted human-user ledger budget |
@@ -138,7 +136,7 @@ Unknown configuration keys fail closed.
 
 ### Pi recent-context budget
 
-Pi's normal `compaction.keepRecentTokens` is the maximum raw recent-context budget. The plugin may choose a smaller effective budget so both LLM outputs and deterministic state fit under `targetPostCompactTokens`.
+Pi's normal `compaction.keepRecentTokens` is the maximum raw recent-context budget. The plugin may choose a smaller effective raw budget to reserve room for deterministic state. After the actual retained suffix is known, each parallel LLM lane gets the remaining checkpoint room (`targetPostCompactTokens - retained raw tokens - structural reserve`) as its request ceiling, further capped only by the provider model's own maximum. There are no fixed audit/execution token caps.
 
 The target is soft: LLM summaries are never clipped merely to hit it. Oversized/tool-heavy turns can be split at provider-safe boundaries rather than retained wholesale.
 
@@ -210,9 +208,13 @@ This release intentionally removes intent support completely:
 - no `lanes.intent` setting;
 - no intent/workflow prompt files.
 
-Replace `lanes.intent` with `lanes.audit` if you had a lane override. Remove obsolete `intentWorkflowChars`; unknown keys are rejected so stale configuration is visible rather than silently ignored.
+Replace `lanes.intent` with `lanes.audit` if you had a lane override, or remove the lane block entirely to use the defaults. Remove obsolete `intentWorkflowChars` and `maxOutputTokens`; unknown keys are rejected so stale configuration is visible rather than silently ignored.
 
 Old prompt overrides such as `one-round-compaction-intent.md` and `one-round-compaction-workflow-*.md` are no longer read. Use `one-round-compaction-audit.md` instead.
+
+A configuration or prompt-loading error now **cancels compaction** instead of returning control to Pi native compaction. This prevents a stale config from silently changing the compaction mechanism. Explicit `fallbackToNative: true` still applies only to runtime lane failures after valid configuration has loaded.
+
+On the first new-format compaction, known v5 normal checkpoints and Pi native checkpoints can be translated into bounded, neutral migration evidence so active work is not lost. The removed intent-workflow format is not detected, loaded, or reactivated. After a v6 checkpoint exists, only the new `Work-State Audit` and `Execution State` sections are carried forward.
 
 ## Development
 

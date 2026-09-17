@@ -12,6 +12,7 @@ import {
   collectUserMessageLedger,
   combineUsage,
   computeEffectiveRecentTokenBudget,
+  computeLaneOutputTokenBudget,
   fitCheckpointToTarget,
   makeOneRoundDetails,
   prepareWholeTurnCompaction,
@@ -371,8 +372,8 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         loadPromptSet(ctx),
       ]);
     } catch (error) {
-      ctx.ui.notify(`One-round compaction configuration/prompt error: ${formatError(error)}`, "error");
-      return;
+      ctx.ui.notify(`One-round compaction configuration/prompt error: ${formatError(error)}. Native compaction is blocked until this is fixed.`, "error");
+      return { cancel: true };
     }
 
     const { config } = loaded;
@@ -398,10 +399,6 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const effectiveRecentTokenBudget = computeEffectiveRecentTokenBudget({
       targetPostCompactTokens: config.targetPostCompactTokens,
       keepRecentTokens: event.preparation.settings.keepRecentTokens,
-      // Reserve the configured maximum lane outputs up front. Actual outputs are
-      // normally much smaller; target fitting after the calls gives the unused
-      // room back to deterministic state rather than risking raw-context dominance.
-      laneOutputReserveTokens: auditLaneConfig.maxOutputTokens + executionLaneConfig.maxOutputTokens,
       deterministicReserveChars,
     });
 
@@ -410,6 +407,10 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       effectiveRecentTokenBudget,
       config.targetPostCompactTokens,
     );
+    const laneOutputBudgetTokens = computeLaneOutputTokenBudget({
+      targetPostCompactTokens: config.targetPostCompactTokens,
+      estimatedRetainedTokens: boundary.estimatedRetainedTokens,
+    });
     const previousSummary = boundary.previousSummary;
     const allDiscarded = boundary.messagesToSummarize;
     if (allDiscarded.length === 0) return;
@@ -507,7 +508,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
 
     const started = performance.now();
     ctx.ui.notify(
-      `One-round compaction: 2 parallel lanes (work-state audit + execution); target ${config.targetPostCompactTokens.toLocaleString()} tokens; raw recent budget ${effectiveRecentTokenBudget.toLocaleString()} (Pi keepRecentTokens ${event.preparation.settings.keepRecentTokens.toLocaleString()}); retaining ~${boundary.estimatedRetainedTokens.toLocaleString()} tokens (${boundary.boundaryMode})`,
+      `One-round compaction: 2 parallel lanes (work-state audit + execution); target ${config.targetPostCompactTokens.toLocaleString()} tokens; derived per-lane output budget ${laneOutputBudgetTokens.toLocaleString()}; raw recent budget ${effectiveRecentTokenBudget.toLocaleString()} (Pi keepRecentTokens ${event.preparation.settings.keepRecentTokens.toLocaleString()}); retaining ~${boundary.estimatedRetainedTokens.toLocaleString()} tokens (${boundary.boundaryMode})`,
       "info",
     );
 
@@ -520,6 +521,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         const result = await runLane({
           lane,
           config: lane === "audit" ? auditLaneConfig : executionLaneConfig,
+          outputBudgetTokens: laneOutputBudgetTokens,
           prompt,
           systemPrompt: promptSet.system,
           ctx,
@@ -585,6 +587,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
         keepRecentTokens: event.preparation.settings.keepRecentTokens,
         effectiveRecentTokenBudget,
         targetPostCompactTokens: config.targetPostCompactTokens,
+        laneOutputBudgetTokens,
         estimatedTokensAfter,
         targetExceeded: fitted.targetExceeded,
         renderBudgets: fitted.renderBudgets,
@@ -658,8 +661,8 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `enabled: ${config.enabled}`,
           `global config: ${globalPath}`,
           ...(projectPath ? [`project override: ${projectPath}`] : []),
-          `audit: ${audit.model} thinking=${audit.thinkingLevel} maxOutput=${audit.maxOutputTokens}`,
-          `execution: ${execution.model} thinking=${execution.thinkingLevel} maxOutput=${execution.maxOutputTokens}`,
+          `audit: ${audit.model} thinking=${audit.thinkingLevel}`,
+          `execution: ${execution.model} thinking=${execution.thinkingLevel}`,
           `toolResultChars: ${config.toolResultChars}`,
           `thinkingChars: ${config.thinkingChars}`,
           `recentControlChars: ${config.recentControlChars} (total rendered cumulative user-ledger budget)`,
@@ -676,7 +679,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
           `prompts: system=${promptSet.sources.system}; audit=${promptSet.sources.audit}; execution=${promptSet.sources.execution}`,
           "recent-turn budget: balanced against targetPostCompactTokens; oversized newest turns split at safe message boundaries instead of surviving verbatim",
           `fallbackToNative: ${config.fallbackToNative} (false guarantees no sequential LLM fallback)`,
-          "LLM topology: 2 calls in parallel, deterministic merge, no LLM follow-up/finalizer",
+          "LLM topology: 2 calls in parallel, deterministic merge, no LLM follow-up/finalizer; output budgets are derived per compaction from targetPostCompactTokens and retained raw context",
         ];
         ctx.ui.notify(lines.join("\n"), "info");
       } catch (error) {

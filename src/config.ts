@@ -9,14 +9,12 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export interface LaneConfig {
   model?: string;
   thinkingLevel?: ThinkingLevel;
-  maxOutputTokens?: number;
 }
 
 export interface OneRoundCompactionConfig {
   enabled: boolean;
   model: string;
   thinkingLevel: ThinkingLevel;
-  maxOutputTokens: number;
   toolResultChars: number;
   thinkingChars: number;
   recentControlChars: number;
@@ -42,7 +40,6 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   enabled: true,
   model: "opencode-go/muse-spark-1.2-contributor",
   thinkingLevel: "low",
-  maxOutputTokens: 6144,
   toolResultChars: 2000,
   thinkingChars: 0,
   recentControlChars: 16000,
@@ -59,7 +56,7 @@ export const DEFAULT_CONFIG: OneRoundCompactionConfig = {
   preflightAutoCompact: true,
   fallbackToNative: false,
   lanes: {
-    audit: { thinkingLevel: "medium", maxOutputTokens: 3072 },
+    audit: { thinkingLevel: "medium" },
     execution: {},
   },
 };
@@ -112,7 +109,7 @@ function parseThinkingLevel(value: unknown, key: string, fallback: ThinkingLevel
 function parseLane(value: unknown, key: string): LaneConfig {
   if (value === undefined) return {};
   if (!isObject(value)) throw new Error(`${key} must be an object`);
-  const allowed = new Set(["model", "thinkingLevel", "maxOutputTokens"]);
+  const allowed = new Set(["model", "thinkingLevel"]);
   for (const actual of Object.keys(value)) {
     if (!allowed.has(actual)) throw new Error(`Unknown ${key} key: ${actual}`);
   }
@@ -121,9 +118,6 @@ function parseLane(value: unknown, key: string): LaneConfig {
   if (value.model !== undefined) lane.model = parseString(value.model, `${key}.model`, "");
   if (value.thinkingLevel !== undefined) {
     lane.thinkingLevel = parseThinkingLevel(value.thinkingLevel, `${key}.thinkingLevel`, "low");
-  }
-  if (value.maxOutputTokens !== undefined) {
-    lane.maxOutputTokens = parsePositiveInt(value.maxOutputTokens, `${key}.maxOutputTokens`, 1);
   }
   return lane;
 }
@@ -134,7 +128,6 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     "enabled",
     "model",
     "thinkingLevel",
-    "maxOutputTokens",
     "toolResultChars",
     "thinkingChars",
     "recentControlChars",
@@ -173,7 +166,6 @@ export function parseConfig(value: unknown, base: OneRoundCompactionConfig = DEF
     enabled: parseBoolean(value.enabled, "enabled", base.enabled),
     model: parseString(value.model, "model", base.model),
     thinkingLevel: parseThinkingLevel(value.thinkingLevel, "thinkingLevel", base.thinkingLevel),
-    maxOutputTokens: parsePositiveInt(value.maxOutputTokens, "maxOutputTokens", base.maxOutputTokens),
     toolResultChars: parsePositiveInt(value.toolResultChars, "toolResultChars", base.toolResultChars),
     thinkingChars: parseNonNegativeInt(value.thinkingChars, "thinkingChars", base.thinkingChars),
     recentControlChars: parseNonNegativeInt(value.recentControlChars, "recentControlChars", base.recentControlChars),
@@ -234,6 +226,5 @@ export function resolveLaneConfig(config: OneRoundCompactionConfig, lane: "audit
   return {
     model: override.model ?? config.model,
     thinkingLevel: override.thinkingLevel ?? config.thinkingLevel,
-    maxOutputTokens: override.maxOutputTokens ?? config.maxOutputTokens,
   };
 }

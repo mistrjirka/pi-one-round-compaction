@@ -33,7 +33,6 @@ export type LaneName = "audit" | "execution";
 export interface LaneResolvedConfig {
   model: string;
   thinkingLevel: ThinkingLevel;
-  maxOutputTokens: number;
 }
 
 export interface LaneResult {
@@ -105,6 +104,7 @@ export interface OneRoundDetails {
   estimatedRetainedTokens: number;
   targetPostCompactTokens: number;
   effectiveRecentTokenBudget: number;
+  laneOutputBudgetTokens: number;
   estimatedTokensAfter: number;
   targetExceeded: boolean;
   isSplitTurn: boolean;
@@ -445,30 +445,44 @@ function previousCompactionBoundary(entries: SessionEntry[]): number {
   return 0;
 }
 
+const DEFAULT_CHECKPOINT_OVERHEAD_RESERVE_TOKENS = 1_000;
+
 /**
- * Reserve enough room for both LLM lane outputs and bounded deterministic state,
- * then spend the remainder on raw recent context. The floor keeps compaction from
- * becoming context-starved; the target is therefore soft when the configured target
- * is unrealistically small.
+ * Reserve room for bounded deterministic state and checkpoint structure, then
+ * spend the remainder on raw recent context. LLM output is no longer represented
+ * by a fixed plugin policy; its request budget is derived after the actual raw
+ * suffix has been selected.
  */
 export function computeEffectiveRecentTokenBudget(params: {
   targetPostCompactTokens: number;
   keepRecentTokens: number;
-  laneOutputReserveTokens: number;
   deterministicReserveChars: number;
   overheadReserveTokens?: number;
   minimumRecentTokens?: number;
 }): number {
   const keep = Math.max(0, params.keepRecentTokens);
   if (keep === 0) return 0;
-  const overhead = params.overheadReserveTokens ?? 1_000;
+  const overhead = params.overheadReserveTokens ?? DEFAULT_CHECKPOINT_OVERHEAD_RESERVE_TOKENS;
   const minimum = Math.min(keep, params.minimumRecentTokens ?? 6_000);
   const deterministicTokens = Math.ceil(Math.max(0, params.deterministicReserveChars) / 4);
-  const available = params.targetPostCompactTokens
-    - Math.max(0, params.laneOutputReserveTokens)
-    - deterministicTokens
-    - overhead;
+  const available = params.targetPostCompactTokens - deterministicTokens - overhead;
   return Math.min(keep, Math.max(minimum, available));
+}
+
+/**
+ * Each parallel lane may use the checkpoint room left after the retained raw
+ * suffix and structural overhead. This is a per-run budget derived from the user's
+ * post-compaction target, not a fixed audit/execution output limit. Both lanes get
+ * the same ceiling because neither can observe the other's output in one round.
+ * Actual merged output is still target-fitted afterward.
+ */
+export function computeLaneOutputTokenBudget(params: {
+  targetPostCompactTokens: number;
+  estimatedRetainedTokens: number;
+  overheadReserveTokens?: number;
+}): number {
+  const overhead = params.overheadReserveTokens ?? DEFAULT_CHECKPOINT_OVERHEAD_RESERVE_TOKENS;
+  return Math.max(1, Math.floor(params.targetPostCompactTokens - params.estimatedRetainedTokens - overhead));
 }
 
 function isCutPointMessage(message: CompactionMessage): boolean {
@@ -908,9 +922,10 @@ function renderDeterministicState(
 }
 
 /**
- * Previous checkpoints contain stale copies of deterministic state. Feed only the
- * previous output owned by this same lane back into the next LLM request. Current
- * Fresh Git/user/file state is reconstructed independently below.
+ * Carry only lane-owned state from a v6 checkpoint. For one upgrade boundary,
+ * translate known v5/native checkpoint shapes into neutral migration evidence so
+ * useful accepted-work and execution state survives without reviving removed
+ * legacy runtime modes, prompt roles, or external-ledger behavior.
  */
 export function compactPreviousSummaryForPrompt(
   summary: string | undefined,
@@ -920,12 +935,69 @@ export function compactPreviousSummaryForPrompt(
   const source = summary?.trim();
   if (!source) return undefined;
 
+  const between = (startMarker: string, endMarkers: string[]): string | undefined => {
+    const start = source.indexOf(startMarker);
+    if (start < 0) return undefined;
+    const bodyStart = start + startMarker.length;
+    let end = source.length;
+    for (const marker of endMarkers) {
+      const index = source.indexOf(marker, bodyStart);
+      if (index >= 0) end = Math.min(end, index);
+    }
+    const body = source.slice(bodyStart, end).trim();
+    return body || undefined;
+  };
+
+  const h2Body = (heading: string): string | undefined => {
+    const marker = `## ${heading}`;
+    const start = source.indexOf(marker);
+    if (start < 0) return undefined;
+    const bodyStart = start + marker.length;
+    const rest = source.slice(bodyStart);
+    const next = /\n## [^\n]+/.exec(rest);
+    const body = rest.slice(0, next?.index ?? rest.length).trim();
+    return body || undefined;
+  };
+
+  const migrationBlock = (title: string, body: string): string => {
+    // Demote legacy H2s so they cannot masquerade as current checkpoint sections
+    // if a model echoes the migration evidence.
+    const demoted = body.replace(/^## /gm, "#### ");
+    return `### ${title}\n${demoted}`;
+  };
+
   const startMarker = lane === "audit" ? "## Work-State Audit" : "## Execution State";
   const start = source.indexOf(startMarker);
-  // On the first compaction after an upgrade, an older checkpoint may not have a
-  // work-audit section yet. Give the auditor the bounded historical checkpoint as
-  // fallible evidence instead of preserving any removed legacy lane machinery.
-  if (start < 0) return clip(source, maxChars);
+  if (start < 0) {
+    const migrated: string[] = [];
+    if (lane === "audit") {
+      const v5Task = between("## Task Semantics", ["\n## Execution State"]);
+      if (v5Task) migrated.push(migrationBlock("Migrated prior accepted-work and decision evidence", v5Task));
+
+      for (const [heading, label] of [
+        ["Goal", "Migrated prior goal evidence"],
+        ["Constraints & Preferences", "Migrated prior constraints and preferences"],
+        ["Key Decisions", "Migrated prior decisions"],
+      ] as const) {
+        const body = h2Body(heading);
+        if (body) migrated.push(migrationBlock(label, body));
+      }
+
+    } else {
+      for (const [heading, label] of [
+        ["Progress", "Migrated prior progress"],
+        ["Next Steps", "Migrated prior next steps"],
+        ["Critical Context", "Migrated prior critical context"],
+      ] as const) {
+        const body = h2Body(heading);
+        if (body) migrated.push(migrationBlock(label, body));
+      }
+    }
+
+    return migrated.length > 0
+      ? clip(`### Previous checkpoint migration evidence\nThis is fallible historical evidence only. Reconcile it against newer user messages and fresh evidence.\n\n${migrated.join("\n\n")}`, maxChars)
+      : undefined;
+  }
 
   const endMarkers = lane === "audit"
     ? ["\n## Execution State"]
@@ -1113,6 +1185,7 @@ function assistantText(response: AssistantMessage): string {
 export async function runLane(params: {
   lane: LaneName;
   config: LaneResolvedConfig;
+  outputBudgetTokens: number;
   prompt: string;
   systemPrompt: string;
   ctx: ExtensionContext;
@@ -1138,8 +1211,9 @@ export async function runLane(params: {
   };
   const sessionId = uuidv7();
   const sessionHeaders = openCodeSessionHeaders(model, sessionId);
+  const requestMaxTokens = Math.max(1, Math.min(params.outputBudgetTokens, model.maxTokens || params.outputBudgetTokens));
   const baseOptions: ProviderStreamOptions = {
-    maxTokens: Math.min(params.config.maxOutputTokens, model.maxTokens || params.config.maxOutputTokens),
+    maxTokens: requestMaxTokens,
     signal: params.signal,
     cacheRetention: "none",
     sessionId,
@@ -1200,7 +1274,7 @@ export async function runLane(params: {
     throw new Error(`${params.lane} lane failed: ${response.errorMessage || "provider error"}`);
   }
   if (response.stopReason === "length") {
-    throw new Error(`${params.lane} lane hit maxOutputTokens; refusing to persist a partial checkpoint`);
+    throw new Error(`${params.lane} lane exhausted its derived ${requestMaxTokens}-token checkpoint budget; refusing to persist a partial checkpoint`);
   }
   if (response.content.some((part) => part.type === "toolCall")) {
     throw new Error(`${params.lane} lane attempted to call a tool`);
@@ -1388,6 +1462,7 @@ export function makeOneRoundDetails(params: {
   keepRecentTokens: number;
   effectiveRecentTokenBudget: number;
   targetPostCompactTokens: number;
+  laneOutputBudgetTokens: number;
   estimatedTokensAfter: number;
   targetExceeded: boolean;
   renderBudgets: DeterministicRenderBudgets;
@@ -1411,6 +1486,7 @@ export function makeOneRoundDetails(params: {
     keepRecentTokens: params.keepRecentTokens,
     effectiveRecentTokenBudget: params.effectiveRecentTokenBudget,
     targetPostCompactTokens: params.targetPostCompactTokens,
+    laneOutputBudgetTokens: params.laneOutputBudgetTokens,
     estimatedTokensAfter: params.estimatedTokensAfter,
     targetExceeded: params.targetExceeded,
     renderBudgets: params.renderBudgets,

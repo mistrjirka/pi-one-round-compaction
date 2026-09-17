@@ -26,18 +26,19 @@ test("project-style overrides merge lanes", () => {
     thinkingLevel: "minimal",
     toolResultChars: 1500,
     lanes: {
-      execution: { thinkingLevel: "medium", maxOutputTokens: 4096 },
+      execution: { thinkingLevel: "medium" },
     },
   });
   assert.equal(resolveLaneConfig(config, "audit").thinkingLevel, "medium");
   assert.equal(resolveLaneConfig(config, "execution").thinkingLevel, "medium");
-  assert.equal(resolveLaneConfig(config, "execution").maxOutputTokens, 4096);
   assert.equal(config.toolResultChars, 1500);
 });
 
-test("removed intent settings fail closed", () => {
+test("removed legacy and fixed-output settings fail closed", () => {
   assert.throws(() => parseConfig({ intentWorkflowChars: 8000 }), /Unknown one-round-compaction key: intentWorkflowChars/);
   assert.throws(() => parseConfig({ lanes: { intent: {} } }), /Unknown lanes key: intent/);
+  assert.throws(() => parseConfig({ maxOutputTokens: 6144 }), /Unknown one-round-compaction key: maxOutputTokens/);
+  assert.throws(() => parseConfig({ lanes: { audit: { maxOutputTokens: 3072 } } }), /Unknown lanes.audit key: maxOutputTokens/);
 });
 
 test("unknown keys fail closed", () => {

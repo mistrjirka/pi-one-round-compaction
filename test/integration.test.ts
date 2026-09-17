@@ -168,7 +168,11 @@ test(failOneLane ? "failed lane cancels the sibling model request" : "extension 
 
     const result = await beforeCompact(event as never, fakeCtx as never) as {
       cancel?: boolean;
-      compaction?: { summary: string; details: { plugin: string; lanes: unknown[] }; estimatedTokensAfter?: number };
+      compaction?: {
+        summary: string;
+        details: { plugin: string; lanes: Array<{ lane: string }>; laneOutputBudgetTokens: number };
+        estimatedTokensAfter?: number;
+      };
     };
 
     assert.equal(calls, 2);
@@ -181,7 +185,8 @@ test(failOneLane ? "failed lane cancels the sibling model request" : "extension 
       return;
     }
     assert.equal(result.compaction?.details.plugin, "pi-one-round-compaction");
-    assert.equal(result.compaction?.details.lanes.length, 2);
+    assert.deepEqual(result.compaction?.details.lanes.map((lane) => lane.lane), ["audit", "execution"]);
+    assert.ok((result.compaction?.details.laneOutputBudgetTokens ?? 0) > 0);
     assert.match(result.compaction?.summary ?? "", /## Work-State Audit/);
     assert.match(result.compaction?.summary ?? "", /## Execution State/);
     assert.ok((result.compaction?.estimatedTokensAfter ?? 0) > 0);
@@ -396,6 +401,47 @@ test("forked child user_artifact reads exact parent governing source", async () 
     assert.match(text, /^EXACT PARENT PLAN/);
     assert.match(text, /sourceSessionId=parent-session: end of exact source/);
     assert.equal((await loadUserArtifactManifest(childSessionId)).artifacts.length, 0);
+  } finally {
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+  }
+});
+
+test("invalid plugin config cancels compaction instead of silently falling back to native Pi", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "pi-one-round-invalid-config-"));
+  const agentDir = path.join(root, "agent");
+  const cwd = path.join(root, "repo");
+  await mkdir(agentDir, { recursive: true });
+  await mkdir(cwd, { recursive: true });
+  await writeFile(path.join(agentDir, "one-round-compaction.json"), JSON.stringify({
+    model: "opencode-go/muse-spark-1.3-contributor",
+    lanes: { intent: { thinkingLevel: "medium" } },
+  }));
+
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
+    const fakePi = {
+      on(name: string, handler: (event: unknown, ctx: unknown) => unknown) {
+        const list = handlers.get(name) ?? [];
+        list.push(handler);
+        handlers.set(name, list);
+      },
+      registerTool() {},
+      registerCommand() {},
+    };
+    oneRoundCompaction(fakePi as never);
+    const beforeCompact = handlers.get("session_before_compact")?.[0];
+    assert.ok(beforeCompact);
+    const notifications: string[] = [];
+    const result = await beforeCompact({} as never, {
+      cwd,
+      isProjectTrusted: () => false,
+      ui: { notify(message: string) { notifications.push(message); } },
+    } as never) as { cancel?: boolean } | undefined;
+    assert.equal(result?.cancel, true);
+    assert.ok(notifications.some((message) => /Native compaction is blocked/.test(message)));
   } finally {
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
