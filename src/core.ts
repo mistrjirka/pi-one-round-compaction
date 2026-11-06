@@ -251,11 +251,9 @@ export function serializeExecutionView(
     if (message.role === "custom") {
       const text = convertedMessageText(message);
       if (text) {
-        // pi-subagents emits cumulative transcript snapshots through the subagent
-        // tool, but its final workflow/child handoff arrives as subagent-notify.
-        // Spend the larger budget on that compact semantic handoff, not on every
-        // overlapping transcript poll.
-        const budget = message.customType === "subagent-notify"
+        // Accept current pi-subagent and legacy pi-subagents completion names.
+        // Spend the larger budget on final handoffs, not overlapping progress polls.
+        const budget = (message.customType === "subagent-notify" || message.customType === "subagent-notification")
           ? Math.max(toolResultChars, Math.min(12_000, toolResultChars * 6))
           : toolResultChars;
         parts.push(`[Extension message${message.customType ? `: ${message.customType}` : ""}]: ${clipEvidence(text, budget)}`);

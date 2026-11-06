@@ -76,34 +76,47 @@ test("execution view labels and truncates extension messages as evidence rather 
   assert.ok(text.length < 180);
 });
 
-test("execution view gives final subagent notification more room than transcript/status evidence", () => {
-  const messages = [
-    {
-      role: "custom" as const,
-      customType: "subagent-notify",
-      content: `Background task completed: workflow\n${"child-evidence ".repeat(500)}\nWorkflow run: wf-final`,
-      display: true,
-      timestamp: Date.now(),
-    },
-    {
+for (const customType of ["subagent-notify", "subagent-notification"]) {
+  test(`execution view preserves final ${customType} handoffs without enlarging progress snapshots`, () => {
+    const content = `Background task completed: workflow\n${"child-evidence ".repeat(250)}DECISIVE-HANDOFF\n${"child-evidence ".repeat(250)}\nWorkflow run: wf-final`;
+    const notification = serializeExecutionView([{
+      role: "custom" as const, customType, content, display: true, timestamp: 1,
+    }], 2_000, 0);
+    assert.ok(notification.length > 6_000, notification.length.toString());
+    assert.match(notification, /DECISIVE-HANDOFF/);
+    assert.match(notification, /Workflow run: wf-final/);
+    assert.doesNotMatch(notification, /chars omitted/);
+
+    const progress = serializeExecutionView([{
+      role: "custom" as const, customType: "subagent-supervision", content, display: true, timestamp: 1,
+    }], 2_000, 0);
+    assert.ok(progress.length < 2_200, progress.length.toString());
+    assert.doesNotMatch(progress, /DECISIVE-HANDOFF/);
+    assert.match(progress, /chars omitted/);
+
+    const transcript = serializeExecutionView([{
       role: "toolResult" as const,
-      toolCallId: "transcript",
-      toolName: "subagent",
-      content: [{ type: "text" as const, text: `Transcript target: run-1\n${"overlap ".repeat(1000)}\nTAIL` }],
-      isError: false,
-      timestamp: Date.now(),
-    },
-  ];
-  const text = serializeExecutionView(messages as never, 2_000, 0);
-  const notifyStart = text.indexOf("[Extension message: subagent-notify]");
-  const transcriptStart = text.indexOf("[Tool result: subagent]");
-  assert.ok(notifyStart >= 0 && transcriptStart > notifyStart);
-  const notify = text.slice(notifyStart, transcriptStart);
-  const transcript = text.slice(transcriptStart);
-  assert.ok(notify.length > 6_000, notify.length.toString());
-  assert.ok(transcript.length < 2_200, transcript.length.toString());
-  assert.match(notify, /Workflow run: wf-final/);
-});
+      toolCallId: "transcript", toolName: "agent_wait",
+      content: [{ type: "text" as const, text: content }], isError: false, timestamp: 1,
+    }], 2_000, 0);
+    assert.ok(transcript.length < 2_200, transcript.length.toString());
+    assert.doesNotMatch(transcript, /DECISIVE-HANDOFF/);
+  });
+
+  test(`execution view still caps long ${customType} handoffs and keeps both ends`, () => {
+    const text = serializeExecutionView([{
+      role: "custom" as const,
+      customType,
+      content: `HANDOFF-START\n${"x".repeat(20_000)}\nHANDOFF-END`,
+      display: true,
+      timestamp: 1,
+    }], 2_000, 0);
+    assert.ok(text.length > 12_000 && text.length < 12_200, text.length.toString());
+    assert.match(text, /HANDOFF-START/);
+    assert.match(text, /HANDOFF-END/);
+    assert.match(text, /chars omitted from middle/);
+  });
+}
 
 test("execution view preserves both ends of long subagent completion messages", () => {
   const messages = [{
