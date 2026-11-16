@@ -119,7 +119,7 @@ Important defaults:
 
 | Setting | Default | Purpose |
 |---|---:|---|
-| `targetPostCompactTokens` | 40000 | Soft total target after compaction; also drives the per-run LLM output budget |
+| `targetPostCompactTokens` | 40000 | Soft checkpoint-size target after compaction. Does not limit LLM generation |
 | `toolResultChars` | 2000 | Base retained chars per older tool result |
 | `thinkingChars` | 0 | Older assistant-thinking retention |
 | `recentControlChars` | 16000 | Cumulative compacted human-user ledger budget |
@@ -136,7 +136,7 @@ Unknown configuration keys fail closed.
 
 ### Pi recent-context budget
 
-Pi's normal `compaction.keepRecentTokens` is the maximum raw recent-context budget. The plugin may choose a smaller effective raw budget to reserve room for deterministic state. After the actual retained suffix is known, each parallel LLM lane gets the remaining checkpoint room (`targetPostCompactTokens - retained raw tokens - structural reserve`) as its request ceiling, further capped only by the provider model's own maximum. There are no fixed audit/execution token caps.
+Pi's normal `compaction.keepRecentTokens` is the maximum raw recent-context budget. The plugin may choose a smaller effective raw budget to reserve room for deterministic state. Each parallel LLM lane uses only the model/provider maximum output allowance (`model.maxTokens`). The checkpoint-size target does not impose a generation limit. The final merged checkpoint is fitted to the soft target without clipping LLM summaries. The provider still has a finite maximum, and a provider `length` response fails compaction rather than persisting incomplete summaries.
 
 The target is soft: LLM summaries are never clipped merely to hit it. Oversized/tool-heavy turns can be split at provider-safe boundaries rather than retained wholesale.
 

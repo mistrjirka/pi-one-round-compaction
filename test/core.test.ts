@@ -6,7 +6,6 @@ import {
   collectUserMessageLedger,
   compactPreviousSummaryForPrompt,
   computeEffectiveRecentTokenBudget,
-  computeLaneOutputTokenBudget,
   deterministicMerge,
   emptyUsageForTests,
   extractRecentUserContext,
@@ -399,17 +398,6 @@ test("post-compaction raw budget reserves deterministic and structural checkpoin
   }), 30_250);
 });
 
-test("lane output budget is derived from the current checkpoint room", () => {
-  assert.equal(computeLaneOutputTokenBudget({
-    targetPostCompactTokens: 40_000,
-    estimatedRetainedTokens: 20_000,
-  }), 19_000);
-  assert.equal(computeLaneOutputTokenBudget({
-    targetPostCompactTokens: 40_000,
-    estimatedRetainedTokens: 32_000,
-  }), 7_000);
-});
-
 test("cumulative user ledger spans earlier compaction boundaries and caps each message", () => {
   const long = "z".repeat(1_500);
   const entries = [
@@ -433,7 +421,7 @@ test("cumulative user ledger spans earlier compaction boundaries and caps each m
   assert.equal(ledger[0]?.originalChars, 1_500);
   assert.equal(ledger[0]?.trimmed, true);
   assert.ok((ledger[0]?.text.length ?? 0) <= 900);
-  assert.match(ledger[0]?.text ?? "", /TRIMMED: original 1,500 chars/);
+  assert.ok((ledger[0]?.text ?? "").includes(`TRIMMED: original ${(1_500).toLocaleString()} chars`));
   assert.equal(ledger[1]?.text, "second request");
 });
 
@@ -467,7 +455,7 @@ test("cumulative user ledger ignores legacy v3 details and reconstructs genuine 
   const ledger = collectUserMessageLedger(entries as never, "u3", 900);
   assert.equal(ledger.length, 2);
   assert.equal(ledger.filter((entry) => entry.originalChars === 1_200).length, 1);
-  assert.match(ledger[0]?.text ?? "", /TRIMMED: original 1,200 chars/);
+  assert.ok((ledger[0]?.text ?? "").includes(`TRIMMED: original ${(1_200).toLocaleString()} chars`));
 });
 
 test("cumulative user ledger excludes custom/subagent notifications converted to LLM user role", () => {

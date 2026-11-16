@@ -73,7 +73,6 @@ test("runLane observes provider text deltas when vanilla Pi exposes provider/aut
   const result = await runLane({
     lane: "audit",
     config: laneConfig,
-    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -105,7 +104,6 @@ test("runLane falls back to ModelRegistry.complete when streaming accessors are 
   const result = await runLane({
     lane: "execution",
     config: laneConfig,
-    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -127,6 +125,7 @@ test("runLane sends OpenCode session routing headers through direct provider str
   };
   let streamedOptions: {
     sessionId?: string;
+    maxTokens?: number;
     headers?: Record<string, string | null>;
   } | undefined;
 
@@ -134,7 +133,7 @@ test("runLane sends OpenCode session routing headers through direct provider str
     stream(
       _requestModel: unknown,
       _context: unknown,
-      options: { sessionId?: string; headers?: Record<string, string | null> },
+      options: { sessionId?: string; maxTokens?: number; headers?: Record<string, string | null> },
     ) {
       streamedOptions = options;
       return {
@@ -169,7 +168,6 @@ test("runLane sends OpenCode session routing headers through direct provider str
   await runLane({
     lane: "execution",
     config: { ...laneConfig, model: `${openCodeModel.provider}/${openCodeModel.id}` },
-    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -181,6 +179,7 @@ test("runLane sends OpenCode session routing headers through direct provider str
   assert.ok(streamedOptions.sessionId);
   assert.equal(streamedOptions.headers?.["x-opencode-session"], streamedOptions.sessionId);
   assert.equal(streamedOptions.headers?.["x-opencode-client"], "pi");
+  assert.equal(streamedOptions.maxTokens, openCodeModel.maxTokens);
   assert.equal(streamedOptions.headers?.["X-Test"], "preserved");
   assert.equal(streamedOptions.headers?.["X-OpenCode-Session"], undefined);
 });
@@ -215,7 +214,6 @@ test("runLane sends OpenCode session routing headers through ModelRegistry.compl
   await runLane({
     lane: "execution",
     config: { ...laneConfig, model: `${openCodeModel.provider}/${openCodeModel.id}` },
-    outputBudgetTokens: 2048,
     prompt: "checkpoint",
     systemPrompt: "system",
     ctx: ctx as never,
@@ -228,7 +226,7 @@ test("runLane sends OpenCode session routing headers through ModelRegistry.compl
   assert.equal(completionOptions.headers?.["x-opencode-client"], "pi");
 });
 
-test("runLane derives request maxTokens from the per-run checkpoint budget and provider maximum", async () => {
+test("runLane requests the model output maximum without a checkpoint-derived cap", async () => {
   const seen: number[] = [];
   const ctx = {
     modelRegistry: {
@@ -242,17 +240,39 @@ test("runLane derives request maxTokens from the per-run checkpoint budget and p
     },
   };
 
-  for (const outputBudgetTokens of [1500, 10_000]) {
-    await runLane({
-      lane: "execution",
+  await runLane({
+    lane: "execution",
+    config: laneConfig,
+    prompt: "checkpoint",
+    systemPrompt: "system",
+    ctx: ctx as never,
+    signal: new AbortController().signal,
+  });
+
+  assert.deepEqual(seen, [model.maxTokens]);
+});
+
+test("runLane rejects provider-length responses instead of retaining partial summaries", async () => {
+  const ctx = {
+    modelRegistry: {
+      find(providerId: string, modelId: string) {
+        return providerId === model.provider && modelId === model.id ? model : undefined;
+      },
+      async complete(_model: unknown, _context: unknown, options: { maxTokens?: number }) {
+        assert.equal(options.maxTokens, model.maxTokens);
+        return { ...finalMessage("incomplete checkpoint"), stopReason: "length" as const };
+      },
+    },
+  };
+  await assert.rejects(
+    runLane({
+      lane: "audit",
       config: laneConfig,
-      outputBudgetTokens,
       prompt: "checkpoint",
       systemPrompt: "system",
       ctx: ctx as never,
       signal: new AbortController().signal,
-    });
-  }
-
-  assert.deepEqual(seen, [1500, model.maxTokens]);
+    }),
+    /audit lane reached the provider.*output limit/,
+  );
 });

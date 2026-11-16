@@ -104,7 +104,6 @@ export interface OneRoundDetails {
   estimatedRetainedTokens: number;
   targetPostCompactTokens: number;
   effectiveRecentTokenBudget: number;
-  laneOutputBudgetTokens: number;
   estimatedTokensAfter: number;
   targetExceeded: boolean;
   isSplitTurn: boolean;
@@ -449,9 +448,8 @@ const DEFAULT_CHECKPOINT_OVERHEAD_RESERVE_TOKENS = 1_000;
 
 /**
  * Reserve room for bounded deterministic state and checkpoint structure, then
- * spend the remainder on raw recent context. LLM output is no longer represented
- * by a fixed plugin policy; its request budget is derived after the actual raw
- * suffix has been selected.
+ * spend the remainder on raw recent context. This checkpoint-retention target
+ * never limits the independent LLM output generation.
  */
 export function computeEffectiveRecentTokenBudget(params: {
   targetPostCompactTokens: number;
@@ -467,22 +465,6 @@ export function computeEffectiveRecentTokenBudget(params: {
   const deterministicTokens = Math.ceil(Math.max(0, params.deterministicReserveChars) / 4);
   const available = params.targetPostCompactTokens - deterministicTokens - overhead;
   return Math.min(keep, Math.max(minimum, available));
-}
-
-/**
- * Each parallel lane may use the checkpoint room left after the retained raw
- * suffix and structural overhead. This is a per-run budget derived from the user's
- * post-compaction target, not a fixed audit/execution output limit. Both lanes get
- * the same ceiling because neither can observe the other's output in one round.
- * Actual merged output is still target-fitted afterward.
- */
-export function computeLaneOutputTokenBudget(params: {
-  targetPostCompactTokens: number;
-  estimatedRetainedTokens: number;
-  overheadReserveTokens?: number;
-}): number {
-  const overhead = params.overheadReserveTokens ?? DEFAULT_CHECKPOINT_OVERHEAD_RESERVE_TOKENS;
-  return Math.max(1, Math.floor(params.targetPostCompactTokens - params.estimatedRetainedTokens - overhead));
 }
 
 function isCutPointMessage(message: CompactionMessage): boolean {
@@ -1185,7 +1167,6 @@ function assistantText(response: AssistantMessage): string {
 export async function runLane(params: {
   lane: LaneName;
   config: LaneResolvedConfig;
-  outputBudgetTokens: number;
   prompt: string;
   systemPrompt: string;
   ctx: ExtensionContext;
@@ -1211,9 +1192,10 @@ export async function runLane(params: {
   };
   const sessionId = uuidv7();
   const sessionHeaders = openCodeSessionHeaders(model, sessionId);
-  const requestMaxTokens = Math.max(1, Math.min(params.outputBudgetTokens, model.maxTokens || params.outputBudgetTokens));
+  // Never derive an LLM generation cap from the desired checkpoint size.
+  // The provider/model maximum is the only output ceiling we request.
   const baseOptions: ProviderStreamOptions = {
-    maxTokens: requestMaxTokens,
+    maxTokens: model.maxTokens,
     signal: params.signal,
     cacheRetention: "none",
     sessionId,
@@ -1274,7 +1256,7 @@ export async function runLane(params: {
     throw new Error(`${params.lane} lane failed: ${response.errorMessage || "provider error"}`);
   }
   if (response.stopReason === "length") {
-    throw new Error(`${params.lane} lane exhausted its derived ${requestMaxTokens}-token checkpoint budget; refusing to persist a partial checkpoint`);
+    throw new Error(`${params.lane} lane reached the provider/model output limit (${model.maxTokens} tokens); refusing to persist a partial checkpoint`);
   }
   if (response.content.some((part) => part.type === "toolCall")) {
     throw new Error(`${params.lane} lane attempted to call a tool`);
@@ -1462,7 +1444,6 @@ export function makeOneRoundDetails(params: {
   keepRecentTokens: number;
   effectiveRecentTokenBudget: number;
   targetPostCompactTokens: number;
-  laneOutputBudgetTokens: number;
   estimatedTokensAfter: number;
   targetExceeded: boolean;
   renderBudgets: DeterministicRenderBudgets;
@@ -1486,7 +1467,6 @@ export function makeOneRoundDetails(params: {
     keepRecentTokens: params.keepRecentTokens,
     effectiveRecentTokenBudget: params.effectiveRecentTokenBudget,
     targetPostCompactTokens: params.targetPostCompactTokens,
-    laneOutputBudgetTokens: params.laneOutputBudgetTokens,
     estimatedTokensAfter: params.estimatedTokensAfter,
     targetExceeded: params.targetExceeded,
     renderBudgets: params.renderBudgets,

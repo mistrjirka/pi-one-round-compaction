@@ -170,7 +170,7 @@ test(failOneLane ? "failed lane cancels the sibling model request" : "extension 
       cancel?: boolean;
       compaction?: {
         summary: string;
-        details: { plugin: string; lanes: Array<{ lane: string }>; laneOutputBudgetTokens: number };
+        details: { plugin: string; lanes: Array<{ lane: string }> };
         estimatedTokensAfter?: number;
       };
     };
@@ -186,7 +186,7 @@ test(failOneLane ? "failed lane cancels the sibling model request" : "extension 
     }
     assert.equal(result.compaction?.details.plugin, "pi-one-round-compaction");
     assert.deepEqual(result.compaction?.details.lanes.map((lane) => lane.lane), ["audit", "execution"]);
-    assert.ok((result.compaction?.details.laneOutputBudgetTokens ?? 0) > 0);
+    assert.equal("laneOutputBudgetTokens" in (result.compaction?.details ?? {}), false);
     assert.match(result.compaction?.summary ?? "", /## Work-State Audit/);
     assert.match(result.compaction?.summary ?? "", /## Execution State/);
     assert.ok((result.compaction?.estimatedTokensAfter ?? 0) > 0);
@@ -495,7 +495,7 @@ test("idle input preflight compacts before a prompt would cross the model contex
     const result = await input({ type: "input", text: "x".repeat(12_000), source: "interactive" } as never, fakeCtx as never);
     assert.equal(result, undefined);
     assert.equal(compactCalls, 1);
-    assert.ok(notifications.some((message) => /273,000 \/ 272,000/.test(message)));
+    assert.ok(notifications.some((message) => message.includes(`${(273_000).toLocaleString()} / ${(272_000).toLocaleString()}`)));
   } finally {
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
