@@ -44,6 +44,14 @@ The execution lane tracks the operational handoff:
 
 The checkpoint keeps these lanes separate, then appends deterministic Git/file/user state.
 
+## Live subagent continuity
+
+When `@mistrjirka/pi-subagent` **0.5.14 or newer** runs in the same Pi process, compaction obtains a small, read-only snapshot of active **direct** children. The checkpoint records their short `@name`, current `running`/`waiting`/`idle` state, label, and a bounded task description. It excludes exited workers and does not read child transcripts or save their tool state. A missing or older subagent extension causes no roster to be added.
+
+The live roster is rendered within the ordinary deterministic checkpoint budget. Its characters also reserve room before recent raw-context selection, and the final token estimate includes it. If the target is tight, the normal checkpoint fitter shortens the roster along with other deterministic evidence. If even the minimum useful state and both full model summaries cannot fit, compaction reports the existing `targetExceeded` warning instead of silently clipping the summaries.
+
+The roster is a snapshot, not a live monitor. Run `agent_list` after compaction to see updated direct workers, and `agent_recover` after restarting Pi to find saved persistent workers. Nested workers are not included in this direct-child snapshot.
+
 ## Compatibility
 
 - Pi Coding Agent `>= 0.84.0` (tested with `0.84.4`)

@@ -24,6 +24,7 @@ import {
 
 import type { OneRoundCompactionConfig, ThinkingLevel } from "./config.js";
 import { SPLIT_TURN_NOTE } from "./prompts.js";
+import { renderLiveSubagentRoster, type LiveSubagentRoster } from "./subagent-roster.js";
 import { renderDurableUserReferences, type DurableUserReference, type UserArtifactLocator, type UserArtifactRecord } from "./user-artifacts.js";
 
 const execFileAsync = promisify(execFile);
@@ -65,10 +66,14 @@ export interface DeterministicRenderBudgets {
   readFilesChars: number;
   userMessagesChars: number;
   userArtifactReferencesChars: number;
+  /** A current, bounded direct-agent roster. Included in checkpoint token fitting. */
+  subagentRosterChars?: number;
 }
 
 export interface DeterministicState {
   git?: GitState;
+  /** Fresh in-process snapshot, not a stale previous checkpoint or transcript copy. */
+  subagentRoster?: LiveSubagentRoster;
   /** Cumulative Pi-compatible file metadata retained in details for recovery/diagnostics. */
   readFiles: string[];
   modifiedFiles: string[];
@@ -873,6 +878,8 @@ function renderDeterministicState(
   budgets: DeterministicRenderBudgets,
 ): string {
   const sections: string[] = [];
+  const roster = renderLiveSubagentRoster(state.subagentRoster, budgets.subagentRosterChars ?? 0);
+  if (roster) sections.push(roster);
   if (state.git) {
     const git = renderGitState(state.git, budgets.gitStateChars);
     if (git) sections.push(git);
@@ -1342,6 +1349,7 @@ function budgetFloors(state: DeterministicState, max: DeterministicRenderBudgets
     userArtifactReferencesChars: (state.knownUserArtifactIds?.length ?? state.userArtifacts?.length ?? 0) > 0
       ? Math.min(max.userArtifactReferencesChars, 1_000)
       : 0,
+    subagentRosterChars: state.subagentRoster?.agents.length ? Math.min(max.subagentRosterChars ?? 0, 260) : 0,
   };
 }
 
@@ -1357,6 +1365,7 @@ function interpolateBudgets(
     readFilesChars: pick(floors.readFilesChars, max.readFilesChars),
     userMessagesChars: pick(floors.userMessagesChars, max.userMessagesChars),
     userArtifactReferencesChars: pick(floors.userArtifactReferencesChars, max.userArtifactReferencesChars),
+    subagentRosterChars: pick(floors.subagentRosterChars ?? 0, max.subagentRosterChars ?? 0),
   };
 }
 
