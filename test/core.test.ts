@@ -855,3 +855,33 @@ test("model references allow slashes only after provider delimiter", () => {
   });
   assert.equal(parseModelReference("broken"), undefined);
 });
+
+test("active background commands are kept in the deterministic token budget", () => {
+  const usage = emptyUsageForTests();
+  const audit: LaneResult = { lane: "audit", text: "## Active Obligations\n- Finish release", usage, model: "p/m", thinkingLevel: "low", durationMs: 1 };
+  const execution: LaneResult = { lane: "execution", text: "## Continuation Anchor\n- Check CI", usage, model: "p/m", thinkingLevel: "low", durationMs: 1 };
+  const deterministic: DeterministicState = {
+    readFiles: [], modifiedFiles: [], traceReadFiles: [], traceEditedFiles: [], userMessages: [],
+    backgroundRoster: { total: 2, tasks: [
+      { id: "bg-1", command: "gh run watch 123 --exit-status", startedAt: 100 },
+      { id: "bg-2", command: "npm run build", startedAt: 150 },
+    ] },
+  };
+  const maxRenderBudgets = {
+    gitStateChars: 0, editedFilesChars: 0, readFilesChars: 0,
+    userMessagesChars: 0, userArtifactReferencesChars: 0, backgroundRosterChars: 750,
+  };
+  const rich = deterministicMerge({ audit, execution, deterministic, renderBudgets: maxRenderBudgets, isSplitTurn: false });
+  assert.match(rich, /bg-1 \[running\]/);
+  assert.match(rich, /bg-2 \[running\]/);
+  const retained = 500;
+  const fitted = fitCheckpointToTarget({
+    audit, execution, deterministic, maxRenderBudgets,
+    isSplitTurn: false, estimatedRetainedTokens: retained,
+    targetPostCompactTokens: retained + Math.ceil(rich.length / 4),
+  });
+  assert.equal(fitted.targetExceeded, false);
+  assert.ok(fitted.estimatedTokensAfter <= retained + Math.ceil(rich.length / 4));
+  assert.match(fitted.summary, /bg-1 \[running\]/);
+  assert.match(fitted.summary, /bg-2 \[running\]/);
+});
