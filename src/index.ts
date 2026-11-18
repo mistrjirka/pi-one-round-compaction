@@ -27,6 +27,7 @@ import { prepareWholeTurnCompactionWithUnderfillRecovery } from "./retention.js"
 import { createProgressReporter } from "./progress.js";
 import { getPreflightProjection, projectionExceedsContext } from "./preflight.js";
 import { readLiveSubagentRoster } from "./subagent-roster.js";
+import { readRunningBackgroundCommands } from "./background-roster.js";
 import {
   backfillUserArtifacts,
   loadUserArtifactCatalog,
@@ -391,6 +392,10 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     // target and reserve space when selecting the raw context suffix.
     const subagentRoster = readLiveSubagentRoster(pi.events);
     const subagentRosterChars = subagentRoster ? Math.min(4_500, 120 + subagentRoster.agents.length * 185) : 0;
+    // pi-bg-bash stores live task state per Pi process. Only capture this
+    // session's running jobs. Never read logs or replay detached commands.
+    const backgroundRoster = readRunningBackgroundCommands(ctx.sessionManager.getSessionId());
+    const backgroundRosterChars = backgroundRoster ? Math.min(4_500, 130 + backgroundRoster.tasks.length * 255) : 0;
     const auditLaneConfig = resolveLaneConfig(config, "audit");
     const executionLaneConfig = resolveLaneConfig(config, "execution");
     const maxRenderBudgets: DeterministicRenderBudgets = {
@@ -400,6 +405,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       userMessagesChars: config.recentControlChars,
       userArtifactReferencesChars: hasDurableUserSources ? config.userArtifactReferenceChars : 0,
       subagentRosterChars,
+      backgroundRosterChars,
     };
     const deterministicReserveChars = Object.values(maxRenderBudgets).reduce((sum, value) => sum + value, 0);
     const effectiveRecentTokenBudget = computeEffectiveRecentTokenBudget({
@@ -468,6 +474,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
     const deterministicWithoutGit: DeterministicState = {
       ...fileState,
       ...(subagentRoster ? { subagentRoster } : {}),
+      ...(backgroundRoster ? { backgroundRoster } : {}),
       userMessages,
       durableUserReferences: previousBranchReferences,
       userArtifacts: branchArtifacts,

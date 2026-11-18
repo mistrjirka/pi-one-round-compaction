@@ -52,13 +52,21 @@ The live roster is rendered within the ordinary deterministic checkpoint budget.
 
 The roster is a snapshot, not a live monitor. Run `agent_list` after compaction to see updated direct workers, and `agent_recover` after restarting Pi to find saved persistent workers. Nested workers are not included in this direct-child snapshot.
 
+## Running background shell commands at compaction
+
+When `pi-bg-bash` 0.6.x is loaded in the same Pi process, compaction takes a small, read-only snapshot of background commands that are **still running** in the **current session**. The deterministic checkpoint records their `bg-N` task IDs and bounded command strings. It does not read command output, inspect or restart their processes, or copy any log content. Finished or other-session tasks are excluded.
+
+The list shares the same checkpoint token budget as the live subagent roster and the file/user evidence. It reserves space before raw-context retention, and token fitting can shorten it if needed. This is a point-in-time snapshot, not a live monitor: use `bash_tasks` after compaction to refresh the state and `bash_output` for logs.
+
+The adapter reads pi-bg-bash's stable process-local `Symbol.for("pi-bg-bash.registry")` registry. This is an internal compatibility seam, not a Pi public API. If the registry is absent or changes shape, compaction proceeds without the shell-task snapshot rather than failing.
+
 ## Compatibility
 
 - Pi Coding Agent `>= 0.84.0` (tested with `0.84.4`)
 - Node.js `>= 22.19.0`
 - default compaction model: `opencode-go/muse-spark-1.2-contributor`
 
-The extension uses Pi's public compaction, model-registry, session-entry, and token-estimation APIs.
+The compaction work uses Pi public compaction, model-registry, session-entry, and token-estimation APIs. Running pi-bg-bash task continuity additionally uses the read-only, optional registry compatibility seam described above.
 
 ## Installation
 

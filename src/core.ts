@@ -25,6 +25,7 @@ import {
 import type { OneRoundCompactionConfig, ThinkingLevel } from "./config.js";
 import { SPLIT_TURN_NOTE } from "./prompts.js";
 import { renderLiveSubagentRoster, type LiveSubagentRoster } from "./subagent-roster.js";
+import { renderRunningBackgroundCommands, type RunningBackgroundRoster } from "./background-roster.js";
 import { renderDurableUserReferences, type DurableUserReference, type UserArtifactLocator, type UserArtifactRecord } from "./user-artifacts.js";
 
 const execFileAsync = promisify(execFile);
@@ -68,12 +69,16 @@ export interface DeterministicRenderBudgets {
   userArtifactReferencesChars: number;
   /** A current, bounded direct-agent roster. Included in checkpoint token fitting. */
   subagentRosterChars?: number;
+  /** Preserve currently running background shell tasks in the token budget. */
+  backgroundRosterChars?: number;
 }
 
 export interface DeterministicState {
   git?: GitState;
   /** Fresh in-process snapshot, not a stale previous checkpoint or transcript copy. */
   subagentRoster?: LiveSubagentRoster;
+  /** Snapshot of jobs that can outlive the compaction turn. */
+  backgroundRoster?: RunningBackgroundRoster;
   /** Cumulative Pi-compatible file metadata retained in details for recovery/diagnostics. */
   readFiles: string[];
   modifiedFiles: string[];
@@ -880,6 +885,8 @@ function renderDeterministicState(
   const sections: string[] = [];
   const roster = renderLiveSubagentRoster(state.subagentRoster, budgets.subagentRosterChars ?? 0);
   if (roster) sections.push(roster);
+  const activeJobs = renderRunningBackgroundCommands(state.backgroundRoster, budgets.backgroundRosterChars ?? 0);
+  if (activeJobs) sections.push(activeJobs);
   if (state.git) {
     const git = renderGitState(state.git, budgets.gitStateChars);
     if (git) sections.push(git);
@@ -1350,6 +1357,7 @@ function budgetFloors(state: DeterministicState, max: DeterministicRenderBudgets
       ? Math.min(max.userArtifactReferencesChars, 1_000)
       : 0,
     subagentRosterChars: state.subagentRoster?.agents.length ? Math.min(max.subagentRosterChars ?? 0, 260) : 0,
+    backgroundRosterChars: state.backgroundRoster?.tasks.length ? Math.min(max.backgroundRosterChars ?? 0, 230) : 0,
   };
 }
 
@@ -1366,6 +1374,7 @@ function interpolateBudgets(
     userMessagesChars: pick(floors.userMessagesChars, max.userMessagesChars),
     userArtifactReferencesChars: pick(floors.userArtifactReferencesChars, max.userArtifactReferencesChars),
     subagentRosterChars: pick(floors.subagentRosterChars ?? 0, max.subagentRosterChars ?? 0),
+    backgroundRosterChars: pick(floors.backgroundRosterChars ?? 0, max.backgroundRosterChars ?? 0),
   };
 }
 
