@@ -26,6 +26,7 @@ import {
 import { prepareWholeTurnCompactionWithUnderfillRecovery } from "./retention.js";
 import { createProgressReporter } from "./progress.js";
 import { getPreflightProjection, projectionExceedsContext } from "./preflight.js";
+import { readLiveSubagentRoster } from "./subagent-roster.js";
 import {
   backfillUserArtifacts,
   loadUserArtifactCatalog,
@@ -385,6 +386,11 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       && contentText(entry.message.content, "").length >= config.userArtifactThresholdChars
     );
 
+    // The active agent roster comes from the subagent extension in this Pi process,
+    // not from stale transcript evidence. Its characters share the checkpoint
+    // target and reserve space when selecting the raw context suffix.
+    const subagentRoster = readLiveSubagentRoster(pi.events);
+    const subagentRosterChars = subagentRoster ? Math.min(4_500, 120 + subagentRoster.agents.length * 185) : 0;
     const auditLaneConfig = resolveLaneConfig(config, "audit");
     const executionLaneConfig = resolveLaneConfig(config, "execution");
     const maxRenderBudgets: DeterministicRenderBudgets = {
@@ -393,6 +399,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       readFilesChars: config.readFilesChars,
       userMessagesChars: config.recentControlChars,
       userArtifactReferencesChars: hasDurableUserSources ? config.userArtifactReferenceChars : 0,
+      subagentRosterChars,
     };
     const deterministicReserveChars = Object.values(maxRenderBudgets).reduce((sum, value) => sum + value, 0);
     const effectiveRecentTokenBudget = computeEffectiveRecentTokenBudget({
@@ -460,6 +467,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
 
     const deterministicWithoutGit: DeterministicState = {
       ...fileState,
+      ...(subagentRoster ? { subagentRoster } : {}),
       userMessages,
       durableUserReferences: previousBranchReferences,
       userArtifacts: branchArtifacts,

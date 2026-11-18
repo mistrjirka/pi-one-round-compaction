@@ -707,6 +707,43 @@ test("target fitting preserves both LLM summaries and balances deterministic cat
   assert.ok(fitted.estimatedTokensAfter <= 9_000);
 });
 
+test("live subagent descriptions use the same post-compaction target rather than free extra context", () => {
+  const usage = emptyUsageForTests();
+  const audit: LaneResult = { lane: "audit", text: "## Active Obligations\n- Keep working", usage, model: "p/m", thinkingLevel: "low", durationMs: 1 };
+  const execution: LaneResult = { lane: "execution", text: "## Continuation Anchor\n- Verify current files", usage, model: "p/m", thinkingLevel: "low", durationMs: 1 };
+  const deterministic: DeterministicState = {
+    readFiles: [], modifiedFiles: [], traceReadFiles: [], traceEditedFiles: [], userMessages: [],
+    subagentRoster: { total: 3, agents: [
+      { id: "kim", label: "Reviewer", state: "waiting", description: "Review the test failures and deliver findings" },
+      { id: "sage", label: "Implementer", state: "running", description: "Fix the cache lifecycle and verify" },
+      { id: "leo", label: "Researcher", state: "idle", description: "Research relevant alternatives" },
+    ] },
+  };
+  const maxRenderBudgets = {
+    gitStateChars: 0, editedFilesChars: 0, readFilesChars: 0,
+    userMessagesChars: 0, userArtifactReferencesChars: 0, subagentRosterChars: 650,
+  };
+  const rich = deterministicMerge({ audit, execution, deterministic, renderBudgets: maxRenderBudgets, isSplitTurn: false });
+  const retained = 500;
+  const floorSummary = deterministicMerge({
+    audit, execution, deterministic,
+    renderBudgets: { ...maxRenderBudgets, subagentRosterChars: 260 },
+    isSplitTurn: false,
+  });
+  assert.ok(floorSummary.length < rich.length);
+  const target = retained + Math.ceil((floorSummary.length + Math.floor((rich.length - floorSummary.length) / 2)) / 4);
+  const fitted = fitCheckpointToTarget({
+    audit, execution, deterministic, maxRenderBudgets,
+    isSplitTurn: false, estimatedRetainedTokens: retained, targetPostCompactTokens: target,
+  });
+  assert.ok(retained + Math.ceil(rich.length / 4) > target);
+  assert.equal(fitted.targetExceeded, false);
+  assert.equal(fitted.estimatedTokensAfter, retained + Math.ceil(fitted.summary.length / 4));
+  assert.ok(fitted.estimatedTokensAfter <= target);
+  assert.match(fitted.summary, /@kim \[waiting\]/);
+  assert.ok(fitted.summary.includes(audit.text) && fitted.summary.includes(execution.text));
+});
+
 test("40k target collapses a roughly 150k-token tool-heavy turn without clipping lane summaries", () => {
   const entries: unknown[] = [
     messageEntry("u1", user("older request")),

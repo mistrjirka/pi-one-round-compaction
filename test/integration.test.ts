@@ -74,6 +74,17 @@ test(failOneLane ? "failed lane cancels the sibling model request" : "extension 
   try {
     const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => unknown>>();
     const fakePi = {
+      events: {
+        emit(channel: string, payload: unknown) {
+          if (channel === "pi-subagent:checkpoint-roster:v1") {
+            (payload as { respond: (snapshot: unknown) => void }).respond({
+              v: 1, total: 1, agents: [
+                { id: "sage", state: "running", label: "Implementer", description: "Fix background jobs" },
+              ],
+            });
+          }
+        },
+      },
       on(name: string, handler: (event: unknown, ctx: unknown) => unknown) {
         const list = handlers.get(name) ?? [];
         list.push(handler);
@@ -189,6 +200,7 @@ test(failOneLane ? "failed lane cancels the sibling model request" : "extension 
     assert.equal("laneOutputBudgetTokens" in (result.compaction?.details ?? {}), false);
     assert.match(result.compaction?.summary ?? "", /## Work-State Audit/);
     assert.match(result.compaction?.summary ?? "", /## Execution State/);
+    assert.match(result.compaction?.summary ?? "", /@sage \[running\] "Implementer", task "Fix background jobs"/);
     assert.ok((result.compaction?.estimatedTokensAfter ?? 0) > 0);
   } finally {
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
