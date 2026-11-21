@@ -70,7 +70,9 @@ The compaction work uses Pi public compaction, model-registry, session-entry, an
 
 ## Installation
 
-Only one extension should return a `session_before_compact` result. Remove another compaction override first if necessary, then install:
+PiTTy hosts with a compaction-method selector can keep this extension installed while using cache-aware compaction. Select **Two-model extension** to use its two configured lanes. On older hosts, only one extension should return a `session_before_compact` result.
+
+Install:
 
 ```bash
 pi install git:github.com/mistrjirka/pi-one-round-compaction
@@ -155,6 +157,12 @@ Unknown configuration keys fail closed.
 Pi's normal `compaction.keepRecentTokens` is the maximum raw recent-context budget. The plugin may choose a smaller effective raw budget to reserve room for deterministic state. Each parallel LLM lane uses only the model/provider maximum output allowance (`model.maxTokens`). The checkpoint-size target does not impose a generation limit. The final merged checkpoint is fitted to the soft target without clipping LLM summaries. The provider still has a finite maximum, and a provider `length` response fails compaction rather than persisting incomplete summaries.
 
 The target is soft: LLM summaries are never clipped merely to hit it. Oversized/tool-heavy turns can be split at provider-safe boundaries rather than retained wholesale.
+
+## Compaction method selection
+
+PiTTy defaults to cache-aware compaction with the active model. When that method is selected, this extension yields both its compaction hook and its context-overflow preflight. Its configuration stays unchanged, and the `user_artifact` recovery tool remains available.
+
+Select **Two-model extension** in PiTTy to restore the configured audit and execution lanes. Hosts without the selector keep this extension's existing behavior. Automatic compaction before cache expiry uses the selected method and reports the reason as `cache-expiry`.
 
 ## Zero-reserve preflight
 

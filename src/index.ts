@@ -25,6 +25,7 @@ import {
 } from "./core.js";
 import { prepareWholeTurnCompactionWithUnderfillRecovery } from "./retention.js";
 import { createProgressReporter } from "./progress.js";
+import { isOneRoundSelected } from "./method-selection.js";
 import { getPreflightProjection, projectionExceedsContext } from "./preflight.js";
 import { readLiveSubagentRoster } from "./subagent-roster.js";
 import { readRunningBackgroundCommands } from "./background-roster.js";
@@ -324,7 +325,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
       }
     }
 
-    if (!ctx.isIdle()) return;
+    if (!isOneRoundSelected(ctx) || !ctx.isIdle()) return;
 
     const projection = getPreflightProjection(ctx, event.text, event.images);
     if (!projection || !projectionExceedsContext(projection)) return;
@@ -365,6 +366,7 @@ export default function oneRoundCompaction(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async (event, ctx) => {
+    if (!isOneRoundSelected(ctx, event as { method?: string })) return;
     let loaded: Awaited<ReturnType<typeof loadConfig>>;
     let promptSet: Awaited<ReturnType<typeof loadPromptSet>>;
     try {

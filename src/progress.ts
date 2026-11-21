@@ -22,7 +22,7 @@ export interface CompactionProgressV2 {
   runId: string;
   seq: number;
   phase: ProgressPhase;
-  reason: "manual" | "threshold" | "overflow";
+  reason: "manual" | "threshold" | "overflow" | "cache-expiry";
   elapsedMs: number;
   retainedTurns: number;
   estimatedRetainedTokens: number;
@@ -93,7 +93,7 @@ function widgetLinesForLane(label: string, lane: LaneMutableState): string[] {
 export function createProgressReporter(params: {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
-  reason: "manual" | "threshold" | "overflow";
+  reason: "manual" | "threshold" | "overflow" | "cache-expiry";
   retainedTurns: number;
   estimatedRetainedTokens: number;
   keepRecentTokens: number;
